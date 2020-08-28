@@ -1,5 +1,5 @@
 import tensorflow as tf
-
+import pathlib
 """
     Callback to save model data to disk
 """
@@ -14,7 +14,7 @@ class CheckpointCallback(tf.keras.callbacks.Callback):
 
     def on_epoch_end(self, batch, logs=None):
         self.model.save(
-            f"{self.path}model_{self.epoch}.h5",
+                pathlib.Path(f"{self.path}").join(f"model_{self.epoch}.h5"),
             overwrite=self.overwrite,
             save_format="h5",
         )

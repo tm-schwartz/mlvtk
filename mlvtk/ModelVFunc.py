@@ -7,7 +7,7 @@ import tensorflow as tf
 """
 
 class ModelVFunc(Mlag, tf.python.keras.engine.functional.Functional):
-    def __init__(self, model, msaver_path="vwd/"):
+    def __init__(self, model, msaver_path="vwd"):
         """
             Args:
                 model: tensorflow.python.keras.engine.functional.Functional instance

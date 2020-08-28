@@ -34,7 +34,7 @@ class Mlag:
         self.evr = None  # explained variance ratio
         self.loss = None  # loss function
         self.optimizer = None
-        self.msave_path = msaver_path  # path to save directory
+        self.msave_path = pathlib.Path(msaver_path)  # path to save directory
         self._compatible = False  # are model checkpoints tf compatible
         self._fit = model.fit
         self._compile = model.compile
@@ -56,8 +56,8 @@ class Mlag:
                 b'"class_name": "ModelVSequential"',
                 b'"class_name": "sequential"',
             )
-        for f in os.listdir(self.msave_path):
-            hf = h5py.File(pathlib.Path(self.msave_path, f), "r+")
+        for f in self.msave_path.glob(r'model_[0-9]*'):
+            hf = h5py.File(f, "r+")
             hf.attrs.modify(
                 "model_config",
                 hf.attrs.get("model_config").replace(*replacement),
@@ -110,7 +110,8 @@ class Mlag:
                 NotImplementedError: if `validation_data` is not passed.
         """
 
-        if os.path.isdir(self.msave_path) and len(os.listdir(self.msave_path)):
+        if self.msave_path.exists() and self.msave_path.is_dir() and self.msave_path.lstat().st_size:
+
             overwrite = input(f"{self.msave_path} is not empty, overwrite?")
             while True:
                 if overwrite in ["no", "n"]:
@@ -121,8 +122,8 @@ class Mlag:
                     break
                 overwrite = input("please enter: yes/no/y/n")
 
-        if not os.path.isdir(self.msave_path):
-            os.mkdir(self.msave_path)
+        if not self.msave_path.is_dir():
+            self.msave_path.mkdir(parents=True)
 
         if kwargs.get("callbacks"):
             # TODO: add overwrite option
@@ -278,16 +279,14 @@ class Mlag:
 
     def gen_path(self):
 
-        assert os.path.isdir(
-            self.msave_path
-        ), 'Could not find model save path. Check "msave_path" is set correctly'
+        assert self.msave_path.is_dir(), 'Could not find model save path. Check "msave_path" is set correctly'
 
         if not self._compatible:
             self._tf_compatible()
         files = [
-            pathlib.Path(self.msave_path, file_name)
+            self.msave_path.joinpath(file_name)
             for file_name in sorted(
-                os.listdir(self.msave_path),
+                self.msave_path.glob(r'model_[0-9]*'),
                 key=lambda x: int(x.split("_")[-1][:-3]),
             )
         ]
