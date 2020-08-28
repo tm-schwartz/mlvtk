@@ -1,83 +1,198 @@
 # cspell: disable
 import copy
+import itertools
 import os
-import h5py
 import pathlib
+import shutil
+
+import h5py
 import numpy as np
 import pandas as pd
-import tensorflow as tf
-import itertools
 import plotly.graph_objects as go
+import tensorflow as tf
 from plotly.subplots import make_subplots
 from sklearn.decomposition import PCA
 
 from CheckpointCallback import CheckpointCallback
 
 
+"""
+    Base class containing custom code for loss surface visualization using filter
+    normalization. This currently supports functional or sequential models, not
+    custom models.
+"""
+
+
 class Mlag:
     def __init__(self, model, msaver_path):
-        self.alphas = np.linspace(-3, 3, 35)
+        self.alphas = np.linspace(-3, 3, 35) 
         self.betas = np.linspace(-3, 3, 35)
-        self.testdat = None
-        self.loss_df = None
-        self.xdir = None
-        self.ydir = None
-        self.evr = None
-        self.loss = None
+        self.testdat = None  # test data set used to calculate loss vals
+        self.loss_df = None  # pandas data frame containing loss vals
+        self.xdir = None  # x values of optimizer path
+        self.ydir = None  # y values of optimizer path
+        self.evr = None  # explained variance ratio
+        self.loss = None  # loss function
         self.optimizer = None
-        self.msave_path = msaver_path
-        self._compatible = False
+        self.msave_path = msaver_path  # path to save directory
+        self._compatible = False  # are model checkpoints tf compatible
         self._fit = model.fit
         self._compile = model.compile
         self._type = model.__class__
 
     def _tf_compatible(self):
+        """
+            Check if model checkpoints are compatible with tensorflow.keras
+            loading. If not, then change `class_name` to be compatible.
+        """
+
         if self._type == tf.python.keras.engine.functional.Functional:
-            replacement = (b'"class_name": "ModelVFunctional"', b'"class_name": "Functional"')
+            replacement = (
+                b'"class_name": "ModelVFunctional"',
+                b'"class_name": "Functional"',
+            )
         elif self._type == tf.keras.Sequential:
-            replacement = (b'"class_name": "ModelVSequential"', b'"class_name": "Sequential"')
+            replacement = (
+                b'"class_name": "ModelVSequential"',
+                b'"class_name": "sequential"',
+            )
         for f in os.listdir(self.msave_path):
-            hf = h5py.File(pathlib.Path(self.msave_path, f), 'r+')
-            hf.attrs.modify('model_config', hf.attrs.get('model_config').replace(*replacement))
+            hf = h5py.File(pathlib.Path(self.msave_path, f), "r+")
+            hf.attrs.modify(
+                "model_config",
+                hf.attrs.get("model_config").replace(*replacement),
+            )
             hf.close()
         self._compatible = True
 
     def compile(self, *args, **kwargs):
-        self.optimizer = (kwargs.get('optimizer') if kwargs.get('optimizer') != None
-                          else args[0]).__module__.split('.')[-1]
-        self.loss = (kwargs.get('loss') if kwargs.get(
-            'loss') != None else args[1])
+        """
+            Compile model. Need to know what optimizer and loss function are in
+            order to evaluate model later.
+
+            Args:
+                *args, **kwargs: positional and keyword arguments passed to model.compile
+            
+            Returns:
+                model.compile(*args, **kwargs)
+        """
+        self.optimizer = (
+            kwargs.get("optimizer") if kwargs.get("optimizer") != None else args[0]
+        ).__module__.split(".")[-1]
+        self.loss = kwargs.get("loss") if kwargs.get("loss") != None else args[1]
+
         return self._compile(*args, **kwargs)
 
     def fit(self, *args, **kwargs):
+        """
+            Call model.fit. Create and possibly remove old checkpoint
+            save directory. If old one is reused, can cause errors when
+            calculating path of optimizer if early stopping or a different
+            number of epochs are used.
+
+            Also parse `callbacks` if present, and append
+            `CheckpointCallback` to list of callbacks.
+            If not present, then create list `callbacks` containing
+            `CheckpointCallback`.  
+
+            Finally, verify that `validation_data` has been passed. Currently
+            need seperate val data for calculating loss values.
+
+            Args:
+                *args, **kwargs: positional and keyword arguments to be passed
+                to model.fit.
+                    - `validation_data` must be passed as either positional or
+                        keyword.
+            Returns:
+                model.fit(*args, **kwargs)
+
+            Raises:
+                NotImplementedError: if `validation_data` is not passed.
+        """
+
+        if os.path.isdir(self.msave_path) and len(os.listdir(self.msave_path)):
+            overwrite = input(f"{self.msave_path} is not empty, overwrite?")
+            while True:
+                if overwrite in ["no", "n"]:
+                    self.msave_path = input("Please enter new save folder path ")
+                    break
+                elif overwrite in ["yes", "y"]:
+                    shutil.rmtree(self.msave_path)
+                    break
+                overwrite = input("please enter: yes/no/y/n")
+
         if not os.path.isdir(self.msave_path):
             os.mkdir(self.msave_path)
-        if kwargs.get('callbacks'):
+
+        if kwargs.get("callbacks"):
             # TODO: add overwrite option
-            kwargs['callbacks'].append(
-                CheckpointCallback(path=self.msave_path))
+            kwargs["callbacks"].append(CheckpointCallback(path=self.msave_path))
         else:
-            kwargs['callbacks'] = [CheckpointCallback(path=self.msave_path)]
-        if kwargs.get('validation_data') == None and len(args) < 8:
-            print('Need precomputed `validation_data`')
-            return
-        self.testdat = (kwargs.get('validation_data')
-                        if len(args) < 8 else args[7])
-        print('testdat', self.testdat)
+            kwargs["callbacks"] = [CheckpointCallback(path=self.msave_path)]
+        if kwargs.get("validation_data") == None and len(args) < 8:
+            raise NotImplementedError("Need precomputed `validation_data`")
+        self.testdat = kwargs.get("validation_data") if len(args) < 8 else args[7]
         return self._fit(*args, **kwargs)
 
     def _calculate_loss(self):
-        # TODO: assert self.alphass.shape == beta.shape in outer scope
+        """
+            Create pandas dataframe containing loss values found on loss surface
+            of model. If `self.alphas` and `self.betas` are centered at 0, then
+            (0,0) represents final loss of model on `validation_data`.
+
+            -5   -4   -3    -2    -1    0    1    2    3    4    5   <- alphas
+            -------------------------------------------------------   _ betas
+          -5|                                                     |  v 
+            |                                                     |
+            |                                                     |
+          -4|                                                     |
+            |                                                     |
+            |                                                     |
+          -3|                                                     |
+            |                                                     |
+            |                                                     |
+          -2|                                                     |
+            |                                                     |
+            |                                                     |
+          -1|                                                     |
+            |                                                     |
+            |                                                     |
+           0|                           +                         |  + -> final
+            |                                                     |       loss
+            |                                                     |       of
+           1|                                                     |       model
+            |                                                     |
+            |                                                     |
+           2|                                                     |
+            |                                                     |
+            |                                                     |
+           3|                                                     |
+            |                                                     |
+            |                                                     |
+           4|                                                     |
+            |                                                     |
+            |                                                     |
+           5|                                                     |
+            -------------------------------------------------------
+        """
 
         weights = np.asarray(self.get_weights())
 
         def filter_normalize():
-            delta = np.array([np.reshape(np.random.randn(ww.size), ww.shape)
-                              for ww in weights], dtype='object')
-            etta = np.array([np.reshape(np.random.randn(ww.size), ww.shape)
-                             for ww in weights], dtype='object')
-            if (bn:= filter(lambda layer: layer.name == 'batch_normalization',
-                             self.layers)):
+            delta = np.array(
+                [np.reshape(np.random.randn(ww.size), ww.shape) for ww in weights],
+                dtype="object",
+            )
+            etta = np.array(
+                [np.reshape(np.random.randn(ww.size), ww.shape) for ww in weights],
+                dtype="object",
+            )
+            if (
+                bn := filter(
+                    lambda layer: layer.name == "batch_normalization",
+                    self.layers,
+                )
+            ) :
                 for layer in bn:
                     i = self.layers.index(layer)
                     delta[i] = np.zeros((delta[i].shape))
@@ -86,101 +201,124 @@ class Mlag:
 
             def normalize_filter(fw):
                 f, w = fw
-                return f * \
-                    np.array(
-                        [(np.linalg.norm(w) / (np.linalg.norm(f) + 1e-10))])
+                return f * np.array([(np.linalg.norm(w) / (np.linalg.norm(f) + 1e-10))])
 
-            result = np.array([np.array([d0 * a + d1 * b for d0, d1 in
-                                         zip(map(normalize_filter, zip(delta, weights)),
-                                             map(normalize_filter, zip(etta,
-                                                                       weights)))], dtype='object')
-                               for a, b in paramlist], dtype='object')
+            result = np.array(
+                [
+                    np.array(
+                        [
+                            d0 * a + d1 * b
+                            for d0, d1 in zip(
+                                map(normalize_filter, zip(delta, weights)),
+                                map(normalize_filter, zip(etta, weights)),
+                            )
+                        ],
+                        dtype="object",
+                    )
+                    for a, b in paramlist
+                ],
+                dtype="object",
+            )
 
             return result.reshape(
-                self.alphas.shape[0],
-                self.betas.shape[0],
-                len(weights))
+                self.alphas.shape[0], self.betas.shape[0], len(weights)
+            )
 
         def gen_filter_final():
-            for ix, iy in itertools.product([*range(self.alphas.shape[0])],
-                                            [*range(self.betas.shape[0])]):
+            for ix, iy in itertools.product(
+                [*range(self.alphas.shape[0])], [*range(self.betas.shape[0])]
+            ):
                 yield (ix, iy, filters[ix, iy])
 
         def _calc_weights(data):
-            return (data[0], data[1], np.array([mw + data[2][k]
-                                                for k, mw in enumerate(weights)], dtype='object'))
+            return (
+                data[0],
+                data[1],
+                np.array(
+                    [mw + data[2][k] for k, mw in enumerate(weights)],
+                    dtype="object",
+                ),
+            )
 
         def _calc_loss(w):
-            with tf.device('/GPU:0'):
+            with tf.device("/GPU:0"):
                 new_mod.set_weights(w)
                 new_mod.compile(optimizer=self.optimizer, loss=self.loss)
-                return new_mod.evaluate(self.testdat, use_multiprocessing=True,
-                                        verbose=0)
+                return new_mod.evaluate(
+                    self.testdat, use_multiprocessing=True, verbose=0
+                )
 
         config = self.get_config()
 
         if self._type == tf.python.keras.engine.functional.Functional:
-            config['class_name'] = "Functional"
+            config["class_name"] = "Functional"
+            new_mod = tf.keras.Model.from_config(config)
         elif self._type == tf.keras.Sequential:
-            config['class_name'] = "Sequential"
-
-        new_mod = tf.keras.Model.from_config(config)
+            config["class_name"] = "sequential"
+            new_mod = tf.keras.Sequential.from_config(config)
+            new_mod.build(input_shape=self.layers[0].input_shape)
 
         filters = filter_normalize()
 
         df = pd.DataFrame(index=self.alphas, columns=self.betas)
 
         prog_bar = tf.keras.utils.Progbar(
-            self.alphas.size *
-            self.betas.size,
+            self.alphas.size * self.betas.size,
             width=30,
             verbose=1,
             interval=0.05,
             stateful_metrics=None,
-            unit_name='step')
+            unit_name="step",
+        )
 
-        for step, new_weights in enumerate(
-                map(_calc_weights, gen_filter_final())):
-            df.iloc[new_weights[0], new_weights[1]
-                    ] = _calc_loss(new_weights[2])
+        for step, new_weights in enumerate(map(_calc_weights, gen_filter_final())):
+            df.iloc[new_weights[0], new_weights[1]] = _calc_loss(new_weights[2])
             prog_bar.update(step + 1)
         self.loss_df = df
 
     def gen_path(self):
 
         assert os.path.isdir(
-            self.msave_path), 'Could not find model save path. Check "msave_path" is set correctly'
+            self.msave_path
+        ), 'Could not find model save path. Check "msave_path" is set correctly'
 
         if not self._compatible:
             self._tf_compatible()
-        files = [pathlib.Path(self.msave_path, file_name) for file_name in
-                 sorted(os.listdir(self.msave_path), key=lambda x:
-                        int(x.split('_')[-1][:-3]))]
+        files = [
+            pathlib.Path(self.msave_path, file_name)
+            for file_name in sorted(
+                os.listdir(self.msave_path),
+                key=lambda x: int(x.split("_")[-1][:-3]),
+            )
+        ]
         final_model = tf.keras.models.load_model(files[-1])
         theta_n = final_model.get_weights()
-        raw_weights = [tf.keras.models.load_model(model_file).get_weights() for
-                       model_file in files[:-1]]
-        weight_differences_btw_epochs = [[theta_i - theta_n_i for theta_i, theta_n_i
-                                          in zip(theta, theta_n)] for theta in raw_weights]
+        raw_weights = [
+            tf.keras.models.load_model(model_file).get_weights()
+            for model_file in files[:-1]
+        ]
+        weight_differences_btw_epochs = [
+            [theta_i - theta_n_i for theta_i, theta_n_i in zip(theta, theta_n)]
+            for theta in raw_weights
+        ]
 
         # TODO: rename
         def tensorlist_to_tensor_tf(weights):
-            return np.concatenate([w.flatten() if w.ndim > 1 else w for w in
-                                   weights])
+            return np.concatenate([w.flatten() if w.ndim > 1 else w for w in weights])
 
         def npvec_to_tensorlist_tf(direction, params):
             w2 = copy.deepcopy(params)
             idx = 0
             for i, w in enumerate(w2):
 
-                w2[i] = direction[idx:idx + w.size]
+                w2[i] = direction[idx : idx + w.size]
                 w2[i] = w2[i].flatten()
                 idx += w.size
             return np.concatenate(w2)
 
         def project_1d_tf(w, d):
 
-            assert len(w) == len(d), 'dimension does not match for w and d'
+            assert len(w) == len(d), "dimension does not match for w and d"
             return np.dot(np.array(w), d) / np.linalg.norm(d)
 
         def project_2d_tf(d, dx, dy):
@@ -190,8 +328,7 @@ class Mlag:
             return x, y
 
         pca = PCA(n_components=2)
-        T0 = [tensorlist_to_tensor_tf(i)
-              for i in weight_differences_btw_epochs]
+        T0 = [tensorlist_to_tensor_tf(i) for i in weight_differences_btw_epochs]
         pca.fit(np.array(T0))
         pca_1 = pca.components_[0]
         pca_2 = pca.components_[1]
@@ -199,9 +336,10 @@ class Mlag:
         xdir, ydir = [], []
         for ep in T0:
             xd, yd = project_2d_tf(
-                ep, npvec_to_tensorlist_tf(
-                    pca_1, theta_n), npvec_to_tensorlist_tf(
-                    pca_2, theta_n))
+                ep,
+                npvec_to_tensorlist_tf(pca_1, theta_n),
+                npvec_to_tensorlist_tf(pca_2, theta_n),
+            )
             xdir.append(xd)
             ydir.append(yd)
 
@@ -211,7 +349,7 @@ class Mlag:
 
     def plot(self, title_text=None, save_file=None):
 
-        if self.loss_df == None:
+        if np.any(self.loss_df) == None:
             self._calculate_loss()
 
         if self.xdir == None or self.ydir == None:
@@ -219,14 +357,27 @@ class Mlag:
 
         # TODO: fix title of plot
         fig = make_subplots(
-            rows=1, cols=2,
-            specs=[[{'is_3d': True}, {'type': 'scatter'}]],
-            subplot_titles=[f'3d surface plot with optimizer path', '1d scatter plot of loss values'],)
+            rows=1,
+            cols=2,
+            specs=[[{"is_3d": True}, {"type": "scatter"}]],
+            subplot_titles=[
+                f"3d surface plot with optimizer path",
+                "1d scatter plot of loss values",
+            ],
+        )
         vals = self.loss_df.values.ravel()
-        xs = [self.loss_df.index[i]
-              for i in np.digitize(self.xdir, self.loss_df.index, right=True)]
-        ys = [self.loss_df.columns[i]
-              for i in np.digitize(self.ydir, self.loss_df.columns, right=True)]
+        xs = [
+            self.loss_df.index[i]
+            if i < self.loss_df.index.shape[0]
+            else self.loss_df.index[i - 1]
+            for i in np.digitize(self.xdir, self.loss_df.index, right=True)
+        ]
+        ys = [
+            self.loss_df.columns[i]
+            if i < self.loss_df.columns.shape[0]
+            else self.loss_df.columns[i - 1]
+            for i in np.digitize(self.ydir, self.loss_df.columns, right=True)
+        ]
         zs = [self.loss_df.loc[x, y] for x, y in zip(xs, ys)]
 
         fig.add_trace(
@@ -234,52 +385,51 @@ class Mlag:
                 x=self.loss_df.index,
                 y=self.loss_df.columns,
                 z=self.loss_df.values,
-                opacity=.9,
+                opacity=0.9,
                 showscale=True,
-                lighting=dict(
-                    ambient=0.6,
-                    roughness=0.9,
-                    diffuse=0.5,
-                    fresnel=2),
-                colorscale='haline_r',
-                colorbar=dict(
-                    lenmode='pixels',
-                    len=400)),
+                lighting=dict(ambient=0.6, roughness=0.9, diffuse=0.5, fresnel=2),
+                colorscale="haline_r",
+                colorbar=dict(lenmode="pixels", len=400),
+            ),
             row=1,
-            col=1)
+            col=1,
+        )
         fig.add_scatter3d(
             x=self.xdir,
             y=self.ydir,
             z=zs,
-            marker=dict(
-                size=2,
-                color='red'),
-            line=dict(
-                color='darkblue',
-                width=2),
+            marker=dict(size=2, color="red"),
+            line=dict(color="darkblue", width=2),
             showlegend=True,
-            name='opt path',
+            name="opt path",
             row=1,
-            col=1)
+            col=1,
+        )
 
         fig.add_trace(
             go.Scattergl(
-                x=np.arange(
-                    0,
-                    len(vals)),
+                x=np.arange(0, len(vals)),
                 y=vals,
-                mode='markers',
-                showlegend=False),
+                mode="markers",
+                showlegend=False,
+            ),
             row=1,
-            col=2)
+            col=2,
+        )
 
         if title_text:
-            title = dict(text=title_text, x=.7)
+            title = dict(text=title_text, x=0.7)
         else:
             title = None
-        fig.update_layout(title=title, autosize=False,
-                          width=1200, height=900, margin=dict(l=10), bargap=.2,
-                          paper_bgcolor="LightSteelBlue")
+        fig.update_layout(
+            title=title,
+            autosize=False,
+            width=1200,
+            height=900,
+            margin=dict(l=10),
+            bargap=0.2,
+            paper_bgcolor="LightSteelBlue",
+        )
         fig.show()
         if save_file is not None:
             fig.write_html(f"{save_file}.html")
