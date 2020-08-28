@@ -41,10 +41,13 @@ class Mlag:
         self._type = model.__class__
 
     def _tf_compatible(self):
+
         """
             Check if model checkpoints are compatible with tensorflow.keras
             loading. If not, then change `class_name` to be compatible.
         """
+
+        self.msave_path = pathlib.Path(self.msave_path)
 
         if self._type == tf.python.keras.engine.functional.Functional:
             replacement = (
@@ -110,12 +113,15 @@ class Mlag:
                 NotImplementedError: if `validation_data` is not passed.
         """
 
+        self.msave_path = pathlib.Path(self.msave_path)
+
         if self.msave_path.exists() and self.msave_path.is_dir() and self.msave_path.lstat().st_size:
 
             overwrite = input(f"{self.msave_path} is not empty, overwrite?")
             while True:
                 if overwrite in ["no", "n"]:
                     self.msave_path = input("Please enter new save folder path ")
+                    self.msave_path = pathlib.Path(self.msave_path)
                     break
                 elif overwrite in ["yes", "y"]:
                     shutil.rmtree(self.msave_path)
@@ -176,6 +182,8 @@ class Mlag:
            5|                                                     |
             -------------------------------------------------------
         """
+        
+        self.msave_path = pathlib.Path(self.msave_path)
 
         weights = np.asarray(self.get_weights())
 
@@ -278,16 +286,15 @@ class Mlag:
         self.loss_df = df
 
     def gen_path(self):
-
+        self.msave_path = pathlib.Path(self.msave_path)
         assert self.msave_path.is_dir(), 'Could not find model save path. Check "msave_path" is set correctly'
 
         if not self._compatible:
             self._tf_compatible()
         files = [
-            self.msave_path.joinpath(file_name)
-            for file_name in sorted(
+            file_path for file_path in sorted(
                 self.msave_path.glob(r'model_[0-9]*'),
-                key=lambda x: int(x.split("_")[-1][:-3]),
+                key=lambda x: int(x.parts[-1].split("_")[-1][:-3]),
             )
         ]
         final_model = tf.keras.models.load_model(files[-1])
@@ -347,6 +354,8 @@ class Mlag:
         self.evr = pca.explained_variance_ratio_
 
     def plot(self, title_text=None, save_file=None):
+
+        self.msave_path = pathlib.Path(self.msave_path)
 
         if np.any(self.loss_df) == None:
             self._calculate_loss()
