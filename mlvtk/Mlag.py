@@ -29,6 +29,7 @@ class Mlag:
         self.betas = np.linspace(-3, 3, 35)
         self.testdat = None  # test data set used to calculate loss vals
         self.loss_df = None  # pandas data frame containing loss vals
+        self.i_data = None  # interpolated loss vals
         self.xdir = None  # x values of optimizer path
         self.ydir = None  # y values of optimizer path
         self.evr = None  # explained variance ratio
@@ -185,6 +186,9 @@ class Mlag:
         
         self.msave_path = pathlib.Path(self.msave_path)
 
+        if self.xdir == None or self.ydir == None:
+            self.gen_path()
+
         weights = np.asarray(self.get_weights())
 
         def filter_normalize():
@@ -285,9 +289,10 @@ class Mlag:
             prog_bar.update(step + 1)
         self.loss_df = df
 
-    def gen_path(self):
+    def gen_path(self, res=1):
         self.msave_path = pathlib.Path(self.msave_path)
         assert self.msave_path.is_dir(), 'Could not find model save path. Check "msave_path" is set correctly'
+
 
         if not self._compatible:
             self._tf_compatible()
@@ -353,7 +358,16 @@ class Mlag:
         self.ydir = ydir
         self.evr = pca.explained_variance_ratio_
 
-    def plot(self, title_text=None, save_file=None):
+        # to implement
+        #self.alphas = np.concatenate([self.alphas, self.xdir])
+        #self.betas = np.concatenate([self.betas, self.ydir])
+        #self.alphas.sort()
+        #self.betas.sort()
+
+
+
+    def surface_plot(self, title_text=None, save_file=None,
+            approximate_model_path=True):
 
         self.msave_path = pathlib.Path(self.msave_path)
 
@@ -366,27 +380,33 @@ class Mlag:
         # TODO: fix title of plot
         fig = make_subplots(
             rows=1,
-            cols=2,
-            specs=[[{"is_3d": True}, {"type": "scatter"}]],
+            cols=1,
+            specs=[[{"is_3d": True}]],
             subplot_titles=[
-                f"3d surface plot with optimizer path",
-                "1d scatter plot of loss values",
+                f"Component 1 EVR: {self.evr[0]}, Component 2 EVR: {self.evr[1]}"
             ],
         )
-        vals = self.loss_df.values.ravel()
-        xs = [
-            self.loss_df.index[i]
-            if i < self.loss_df.index.shape[0]
-            else self.loss_df.index[i - 1]
-            for i in np.digitize(self.xdir, self.loss_df.index, right=True)
-        ]
-        ys = [
-            self.loss_df.columns[i]
-            if i < self.loss_df.columns.shape[0]
-            else self.loss_df.columns[i - 1]
-            for i in np.digitize(self.ydir, self.loss_df.columns, right=True)
-        ]
-        zs = [self.loss_df.loc[x, y] for x, y in zip(xs, ys)]
+
+        if approximate_model_path:
+
+          xs = [
+              self.loss_df.index[i]
+              if i < self.loss_df.index.shape[0]
+              else self.loss_df.index[i - 1]
+              for i in np.digitize(self.xdir, self.loss_df.index, right=True)
+          ]
+          ys = [
+              self.loss_df.columns[i]
+              if i < self.loss_df.columns.shape[0]
+              else self.loss_df.columns[i - 1]
+              for i in np.digitize(self.ydir, self.loss_df.columns, right=True)
+          ]
+
+          zs = [self.loss_df.iloc[x, y] for x, y in zip(xs, ys)]
+
+        else:
+            raise NotImplementedError()
+            # zs = [self.loss_df.loc[x, y] for x, y in zip(self.xdir, self.ydir)]
 
         fig.add_trace(
             go.Surface(
@@ -414,21 +434,11 @@ class Mlag:
             col=1,
         )
 
-        fig.add_trace(
-            go.Scattergl(
-                x=np.arange(0, len(vals)),
-                y=vals,
-                mode="markers",
-                showlegend=False,
-            ),
-            row=1,
-            col=2,
-        )
-
         if title_text:
             title = dict(text=title_text, x=0.7)
         else:
             title = None
+
         fig.update_layout(
             title=title,
             autosize=False,
@@ -436,8 +446,40 @@ class Mlag:
             height=900,
             margin=dict(l=10),
             bargap=0.2,
-            paper_bgcolor="LightSteelBlue",
         )
         fig.show()
         if save_file is not None:
             fig.write_html(f"{save_file}.html")
+    
+    def _interpolate(self):
+        _test = np.zeros(self.alphas.shape[0])
+        f_list = sorted(
+                self.msave_path.glob(r'model_[0-9]*'),
+                key=lambda x: int(x.parts[-1].split("_")[-1][:-3]),
+            )
+        mod_0 = tf.keras.models.load_model(f_list[0])
+        mod_1 = tf.keras.models.load_model(f_list[-1])
+        w_0 = mod_0.get_weights()
+        w_1 = mod_1.get_weights()
+        del mod_0
+
+        pb = tf.keras.utils.Progbar(self.alphas.shape[0], unit_name='alpha')
+        for i, alpha in enumerate(self.alphas):
+            theta_a = [theta_0 + theta_1 for theta_0, theta_1 in
+                    zip([(1-alpha)* w for w in w_0], [alpha *
+                        w for w in w_1])] # read from msave_path
+            mod_1.set_weights(theta_a)
+            mod_1.compile(optimizer=self.optimizer, loss=self.loss,
+            metrics=['accuracy'])
+            res = mod_1.evaluate(self.testdat, verbose=0)
+            _test[i] = res[0]
+            pb.update(i + 1)
+        self.i_data = _test # change returned val
+    
+    def interp_plot(self, *args, **kwargs):
+        if np.any(self.i_data) == None:
+            self._interpolate() 
+        fig = go.Figure(data=go.Scatter(x=self.alphas, y=self.i_data))
+        fig.update_layout(
+               *args, **kwargs)
+        fig.show()
