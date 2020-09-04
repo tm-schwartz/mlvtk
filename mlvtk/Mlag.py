@@ -402,7 +402,7 @@ class Mlag:
               for i in np.digitize(self.ydir, self.loss_df.columns, right=True)
           ]
 
-          zs = [self.loss_df.iloc[x, y] for x, y in zip(xs, ys)]
+          zs = [self.loss_df.loc[x, y] for x, y in zip(xs, ys)]
 
         else:
             raise NotImplementedError()
