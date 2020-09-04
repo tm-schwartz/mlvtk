@@ -383,7 +383,7 @@ class Mlag:
             cols=1,
             specs=[[{"is_3d": True}]],
             subplot_titles=[
-                f"Component 1 EVR: {round(self.evr[0], 4)}, Component 2 EVR: {round(self.evr[1], 4)}"
+                f"Component 1 EVR: {np.round(self.evr[0], 4)}, Component 2 EVR: {np.round(self.evr[1], 4)}"
             ],
         )
 
