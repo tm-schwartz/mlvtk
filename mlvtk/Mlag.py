@@ -254,10 +254,9 @@ class Mlag:
             )
 
         def _calc_loss(w):
-            with tf.device("/GPU:0"):
-                new_mod.set_weights(w)
-                new_mod.compile(optimizer=self.optimizer, loss=self.loss)
-                return new_mod.evaluate(
+            new_mod.set_weights(w)
+            new_mod.compile(optimizer=self.optimizer, loss=self.loss)
+            return new_mod.evaluate(
                     self.testdat, use_multiprocessing=True, verbose=0
                 )
 
@@ -283,6 +282,7 @@ class Mlag:
             stateful_metrics=None,
             unit_name="step",
         )
+
 
         for step, new_weights in enumerate(map(_calc_weights, gen_filter_final())):
             df.iloc[new_weights[0], new_weights[1]] = _calc_loss(new_weights[2])
@@ -383,7 +383,7 @@ class Mlag:
             cols=1,
             specs=[[{"is_3d": True}]],
             subplot_titles=[
-                f"Component 1 EVR: {self.evr[0]}, Component 2 EVR: {self.evr[1]}"
+                f"Component 1 EVR: {round(self.evr[0], 4)}, Component 2 EVR: {round(self.evr[1], 4)}"
             ],
         )
 
