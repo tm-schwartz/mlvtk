@@ -1,5 +1,5 @@
 # cspell: disable
-from Mlag import Mlag
+from .Mlag import Mlag
 import tensorflow as tf
 
 """

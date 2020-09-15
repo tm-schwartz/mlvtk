@@ -13,8 +13,10 @@ import tensorflow as tf
 from plotly.subplots import make_subplots
 from sklearn.decomposition import PCA
 
-from CheckpointCallback import CheckpointCallback
+from .CheckpointCallback import CheckpointCallback
 
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR) 
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 """
     Base class containing custom code for loss surface visualization using filter
@@ -34,12 +36,21 @@ class Mlag:
         self.ydir = None  # y values of optimizer path
         self.evr = None  # explained variance ratio
         self.loss = None  # loss function
-        self.optimizer = None
+        self.opt = None
         self.msave_path = pathlib.Path(msaver_path)  # path to save directory
         self._compatible = False  # are model checkpoints tf compatible
         self._fit = model.fit
         self._compile = model.compile
         self._type = model.__class__
+
+        physical_devices = tf.config.list_physical_devices('GPU')
+
+        if physical_devices:
+            try:
+                tf.config.experimental.set_memory_growth(physical_devices[0], True)
+            except:
+                # Invalid device or cannot modify virtual devices once initialized.
+                pass
 
     def _tf_compatible(self):
 
@@ -80,12 +91,18 @@ class Mlag:
             Returns:
                 model.compile(*args, **kwargs)
         """
-        self.optimizer = (
+        self.opt = (
             kwargs.get("optimizer") if kwargs.get("optimizer") != None else args[0]
         ).__module__.split(".")[-1]
+        # compatibility with tf.keras.optimizer.get(...)
+        if self.opt == 'gradient_descent':
+            self.opt = 'SGD'
         self.loss = kwargs.get("loss") if kwargs.get("loss") != None else args[1]
 
-        return self._compile(*args, **kwargs)
+        self._compile(*args, **kwargs)
+        self._is_compiled = True
+
+        #return self._compile(*args, **kwargs)
 
     def fit(self, *args, **kwargs):
         """
@@ -200,12 +217,12 @@ class Mlag:
                 [np.reshape(np.random.randn(ww.size), ww.shape) for ww in weights],
                 dtype="object",
             )
-            if (
-                bn := filter(
+
+            bn = filter(
                     lambda layer: layer.name == "batch_normalization",
                     self.layers,
                 )
-            ) :
+            if bn:
                 for layer in bn:
                     i = self.layers.index(layer)
                     delta[i] = np.zeros((delta[i].shape))
@@ -255,7 +272,6 @@ class Mlag:
 
         def _calc_loss(w):
             new_mod.set_weights(w)
-            new_mod.compile(optimizer=self.optimizer, loss=self.loss)
             return new_mod.evaluate(
                     self.testdat, use_multiprocessing=True, verbose=0
                 )
@@ -270,6 +286,8 @@ class Mlag:
             new_mod = tf.keras.Sequential.from_config(config)
             new_mod.build(input_shape=self.layers[0].input_shape)
 
+        new_mod.compile(optimizer=self.opt, loss=self.loss)
+
         filters = filter_normalize()
 
         df = pd.DataFrame(index=self.alphas, columns=self.betas)
@@ -282,11 +300,10 @@ class Mlag:
             stateful_metrics=None,
             unit_name="step",
         )
-
-
-        for step, new_weights in enumerate(map(_calc_weights, gen_filter_final())):
-            df.iloc[new_weights[0], new_weights[1]] = _calc_loss(new_weights[2])
-            prog_bar.update(step + 1)
+        with tf.device('/:GPU:0'):        
+            for step, new_weights in enumerate(map(_calc_weights, gen_filter_final())):
+                df.iloc[new_weights[0], new_weights[1]] = _calc_loss(new_weights[2])
+                prog_bar.update(step + 1)
         self.loss_df = df
 
     def gen_path(self, res=1):
@@ -469,8 +486,8 @@ class Mlag:
                     zip([(1-alpha)* w for w in w_0], [alpha *
                         w for w in w_1])] # read from msave_path
             mod_1.set_weights(theta_a)
-            mod_1.compile(optimizer=self.optimizer, loss=self.loss,
-            metrics=['accuracy'])
+            # mod_1.compile(optimizer=self.optimizer, loss=self.loss,
+            # metrics=['accuracy'])
             res = mod_1.evaluate(self.testdat, verbose=0)
             _test[i] = res[0]
             pb.update(i + 1)

@@ -1,8 +1,8 @@
 # cspell: disable
 import tensorflow as tf
 
-from ModelVFunc import ModelVFunc
-from ModelVSeq import ModelVSeq
+from .ModelVFunc import ModelVFunc
+from .ModelVSeq import ModelVSeq
 
 
 def create_model(model):
