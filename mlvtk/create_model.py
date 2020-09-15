@@ -7,7 +7,7 @@ from .ModelVSeq import ModelVSeq
 
 def create_model(model):
     """
-    Instantiate the corresponding class depending on model type. 
+    Instantiate the corresponding class depending on model type.
 
     Args:
         model: a tensorflow.python.keras.engine.functional.Functional or
@@ -15,7 +15,7 @@ def create_model(model):
 
     Returns:
         ModelVSeq or ModelVFunc
-    
+
     Raises:
         NotImplementedError: if non-sequential and non-functional model instance
         is passed.

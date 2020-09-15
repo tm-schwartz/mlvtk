@@ -6,13 +6,14 @@ import tensorflow as tf
     Provide support for sequential model method calls
 """
 
+
 class ModelVSeq(Mlag, tf.keras.Sequential):
     def __init__(self, model, msaver_path="vwd/"):
         """
-            Args:
-                model: tensorflow.keras.Sequential instance
-                msaver_path: string containing path of directory to save model
-                checkpoints in
+        Args:
+            model: tensorflow.keras.Sequential instance
+            msaver_path: string containing path of directory to save model
+            checkpoints in
         """
         Mlag.__init__(self, model, msaver_path)
         tf.keras.Sequential.__init__(self, model.layers, model.name)

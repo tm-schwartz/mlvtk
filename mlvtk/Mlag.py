@@ -15,8 +15,8 @@ from sklearn.decomposition import PCA
 
 from .CheckpointCallback import CheckpointCallback
 
-tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR) 
-os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
+tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 """
     Base class containing custom code for loss surface visualization using filter
@@ -27,7 +27,7 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
 class Mlag:
     def __init__(self, model, msaver_path):
-        self.alphas = np.linspace(-3, 3, 35) 
+        self.alphas = np.linspace(-3, 3, 35)
         self.betas = np.linspace(-3, 3, 35)
         self.testdat = None  # test data set used to calculate loss vals
         self.loss_df = None  # pandas data frame containing loss vals
@@ -43,7 +43,7 @@ class Mlag:
         self._compile = model.compile
         self._type = model.__class__
 
-        physical_devices = tf.config.list_physical_devices('GPU')
+        physical_devices = tf.config.list_physical_devices("GPU")
 
         if physical_devices:
             try:
@@ -55,8 +55,8 @@ class Mlag:
     def _tf_compatible(self):
 
         """
-            Check if model checkpoints are compatible with tensorflow.keras
-            loading. If not, then change `class_name` to be compatible.
+        Check if model checkpoints are compatible with tensorflow.keras
+        loading. If not, then change `class_name` to be compatible.
         """
 
         self.msave_path = pathlib.Path(self.msave_path)
@@ -71,7 +71,7 @@ class Mlag:
                 b'"class_name": "ModelVSequential"',
                 b'"class_name": "sequential"',
             )
-        for f in self.msave_path.glob(r'model_[0-9]*'):
+        for f in self.msave_path.glob(r"model_[0-9]*"):
             hf = h5py.File(f, "r+")
             hf.attrs.modify(
                 "model_config",
@@ -82,58 +82,60 @@ class Mlag:
 
     def compile(self, *args, **kwargs):
         """
-            Compile model. Need to know what optimizer and loss function are in
-            order to evaluate model later.
+        Compile model. Need to know what optimizer and loss function are in
+        order to evaluate model later.
 
-            Args:
-                *args, **kwargs: positional and keyword arguments passed to model.compile
-            
-            Returns:
-                model.compile(*args, **kwargs)
+        Args:
+            *args, **kwargs: positional and keyword arguments passed to model.compile
+
+        Returns:
+            model.compile(*args, **kwargs)
         """
         self.opt = (
             kwargs.get("optimizer") if kwargs.get("optimizer") != None else args[0]
         ).__module__.split(".")[-1]
         # compatibility with tf.keras.optimizer.get(...)
-        if self.opt == 'gradient_descent':
-            self.opt = 'SGD'
+        if self.opt == "gradient_descent":
+            self.opt = "SGD"
         self.loss = kwargs.get("loss") if kwargs.get("loss") != None else args[1]
 
         self._compile(*args, **kwargs)
         self._is_compiled = True
 
-        #return self._compile(*args, **kwargs)
-
     def fit(self, *args, **kwargs):
         """
-            Call model.fit. Create and possibly remove old checkpoint
-            save directory. If old one is reused, can cause errors when
-            calculating path of optimizer if early stopping or a different
-            number of epochs are used.
+        Call model.fit. Create and possibly remove old checkpoint
+        save directory. If old one is reused, can cause errors when
+        calculating path of optimizer if early stopping or a different
+        number of epochs are used.
 
-            Also parse `callbacks` if present, and append
-            `CheckpointCallback` to list of callbacks.
-            If not present, then create list `callbacks` containing
-            `CheckpointCallback`.  
+        Also parse `callbacks` if present, and append
+        `CheckpointCallback` to list of callbacks.
+        If not present, then create list `callbacks` containing
+        `CheckpointCallback`.
 
-            Finally, verify that `validation_data` has been passed. Currently
-            need seperate val data for calculating loss values.
+        Finally, verify that `validation_data` has been passed. Currently
+        need seperate val data for calculating loss values.
 
-            Args:
-                *args, **kwargs: positional and keyword arguments to be passed
-                to model.fit.
-                    - `validation_data` must be passed as either positional or
-                        keyword.
-            Returns:
-                model.fit(*args, **kwargs)
+        Args:
+            *args, **kwargs: positional and keyword arguments to be passed
+            to model.fit.
+                - `validation_data` must be passed as either positional or
+                    keyword.
+        Returns:
+            model.fit(*args, **kwargs)
 
-            Raises:
-                NotImplementedError: if `validation_data` is not passed.
+        Raises:
+            NotImplementedError: if `validation_data` is not passed.
         """
 
         self.msave_path = pathlib.Path(self.msave_path)
 
-        if self.msave_path.exists() and self.msave_path.is_dir() and self.msave_path.lstat().st_size:
+        if (
+            self.msave_path.exists()
+            and self.msave_path.is_dir()
+            and self.msave_path.lstat().st_size
+        ):
 
             overwrite = input(f"{self.msave_path} is not empty, overwrite?")
             while True:
@@ -161,46 +163,46 @@ class Mlag:
 
     def _calculate_loss(self):
         """
-            Create pandas dataframe containing loss values found on loss surface
-            of model. If `self.alphas` and `self.betas` are centered at 0, then
-            (0,0) represents final loss of model on `validation_data`.
+          Create pandas dataframe containing loss values found on loss surface
+          of model. If `self.alphas` and `self.betas` are centered at 0, then
+          (0,0) represents final loss of model on `validation_data`.
 
-            -5   -4   -3    -2    -1    0    1    2    3    4    5   <- alphas
-            -------------------------------------------------------   _ betas
-          -5|                                                     |  v 
-            |                                                     |
-            |                                                     |
-          -4|                                                     |
-            |                                                     |
-            |                                                     |
-          -3|                                                     |
-            |                                                     |
-            |                                                     |
-          -2|                                                     |
-            |                                                     |
-            |                                                     |
-          -1|                                                     |
-            |                                                     |
-            |                                                     |
-           0|                           +                         |  + -> final
-            |                                                     |       loss
-            |                                                     |       of
-           1|                                                     |       model
-            |                                                     |
-            |                                                     |
-           2|                                                     |
-            |                                                     |
-            |                                                     |
-           3|                                                     |
-            |                                                     |
-            |                                                     |
-           4|                                                     |
-            |                                                     |
-            |                                                     |
-           5|                                                     |
-            -------------------------------------------------------
+          -5   -4   -3    -2    -1    0    1    2    3    4    5   <- alphas
+          -------------------------------------------------------   _ betas
+        -5|                                                     |  v
+          |                                                     |
+          |                                                     |
+        -4|                                                     |
+          |                                                     |
+          |                                                     |
+        -3|                                                     |
+          |                                                     |
+          |                                                     |
+        -2|                                                     |
+          |                                                     |
+          |                                                     |
+        -1|                                                     |
+          |                                                     |
+          |                                                     |
+         0|                           +                         |  + -> final
+          |                                                     |       loss
+          |                                                     |       of
+         1|                                                     |       model
+          |                                                     |
+          |                                                     |
+         2|                                                     |
+          |                                                     |
+          |                                                     |
+         3|                                                     |
+          |                                                     |
+          |                                                     |
+         4|                                                     |
+          |                                                     |
+          |                                                     |
+         5|                                                     |
+          -------------------------------------------------------
         """
-        
+
         self.msave_path = pathlib.Path(self.msave_path)
 
         if self.xdir == None or self.ydir == None:
@@ -219,9 +221,9 @@ class Mlag:
             )
 
             bn = filter(
-                    lambda layer: layer.name == "batch_normalization",
-                    self.layers,
-                )
+                lambda layer: layer.name == "batch_normalization",
+                self.layers,
+            )
             if bn:
                 for layer in bn:
                     i = self.layers.index(layer)
@@ -272,9 +274,7 @@ class Mlag:
 
         def _calc_loss(w):
             new_mod.set_weights(w)
-            return new_mod.evaluate(
-                    self.testdat, use_multiprocessing=True, verbose=0
-                )
+            return new_mod.evaluate(self.testdat, use_multiprocessing=True, verbose=0)
 
         config = self.get_config()
 
@@ -300,7 +300,7 @@ class Mlag:
             stateful_metrics=None,
             unit_name="step",
         )
-        with tf.device('/:GPU:0'):        
+        with tf.device("/:GPU:0"):
             for step, new_weights in enumerate(map(_calc_weights, gen_filter_final())):
                 df.iloc[new_weights[0], new_weights[1]] = _calc_loss(new_weights[2])
                 prog_bar.update(step + 1)
@@ -308,14 +308,16 @@ class Mlag:
 
     def gen_path(self, res=1):
         self.msave_path = pathlib.Path(self.msave_path)
-        assert self.msave_path.is_dir(), 'Could not find model save path. Check "msave_path" is set correctly'
-
+        assert (
+            self.msave_path.is_dir()
+        ), 'Could not find model save path. Check "msave_path" is set correctly'
 
         if not self._compatible:
             self._tf_compatible()
         files = [
-            file_path for file_path in sorted(
-                self.msave_path.glob(r'model_[0-9]*'),
+            file_path
+            for file_path in sorted(
+                self.msave_path.glob(r"model_[0-9]*"),
                 key=lambda x: int(x.parts[-1].split("_")[-1][:-3]),
             )
         ]
@@ -376,15 +378,14 @@ class Mlag:
         self.evr = pca.explained_variance_ratio_
 
         # to implement
-        #self.alphas = np.concatenate([self.alphas, self.xdir])
-        #self.betas = np.concatenate([self.betas, self.ydir])
-        #self.alphas.sort()
-        #self.betas.sort()
+        # self.alphas = np.concatenate([self.alphas, self.xdir])
+        # self.betas = np.concatenate([self.betas, self.ydir])
+        # self.alphas.sort()
+        # self.betas.sort()
 
-
-
-    def surface_plot(self, title_text=None, save_file=None,
-            approximate_model_path=True):
+    def surface_plot(
+        self, title_text=None, save_file=None, approximate_model_path=True
+    ):
 
         self.msave_path = pathlib.Path(self.msave_path)
 
@@ -406,20 +407,20 @@ class Mlag:
 
         if approximate_model_path:
 
-          xs = [
-              self.loss_df.index[i]
-              if i < self.loss_df.index.shape[0]
-              else self.loss_df.index[i - 1]
-              for i in np.digitize(self.xdir, self.loss_df.index, right=True)
-          ]
-          ys = [
-              self.loss_df.columns[i]
-              if i < self.loss_df.columns.shape[0]
-              else self.loss_df.columns[i - 1]
-              for i in np.digitize(self.ydir, self.loss_df.columns, right=True)
-          ]
+            xs = [
+                self.loss_df.index[i]
+                if i < self.loss_df.index.shape[0]
+                else self.loss_df.index[i - 1]
+                for i in np.digitize(self.xdir, self.loss_df.index, right=True)
+            ]
+            ys = [
+                self.loss_df.columns[i]
+                if i < self.loss_df.columns.shape[0]
+                else self.loss_df.columns[i - 1]
+                for i in np.digitize(self.ydir, self.loss_df.columns, right=True)
+            ]
 
-          zs = [self.loss_df.loc[x, y] for x, y in zip(xs, ys)]
+            zs = [self.loss_df.loc[x, y] for x, y in zip(xs, ys)]
 
         else:
             raise NotImplementedError()
@@ -467,36 +468,36 @@ class Mlag:
         fig.show()
         if save_file is not None:
             fig.write_html(f"{save_file}.html")
-    
+
     def _interpolate(self):
         _test = np.zeros(self.alphas.shape[0])
         f_list = sorted(
-                self.msave_path.glob(r'model_[0-9]*'),
-                key=lambda x: int(x.parts[-1].split("_")[-1][:-3]),
-            )
+            self.msave_path.glob(r"model_[0-9]*"),
+            key=lambda x: int(x.parts[-1].split("_")[-1][:-3]),
+        )
         mod_0 = tf.keras.models.load_model(f_list[0])
         mod_1 = tf.keras.models.load_model(f_list[-1])
         w_0 = mod_0.get_weights()
         w_1 = mod_1.get_weights()
         del mod_0
 
-        pb = tf.keras.utils.Progbar(self.alphas.shape[0], unit_name='alpha')
+        pb = tf.keras.utils.Progbar(self.alphas.shape[0], unit_name="alpha")
         for i, alpha in enumerate(self.alphas):
-            theta_a = [theta_0 + theta_1 for theta_0, theta_1 in
-                    zip([(1-alpha)* w for w in w_0], [alpha *
-                        w for w in w_1])] # read from msave_path
+            theta_a = [
+                theta_0 + theta_1
+                for theta_0, theta_1 in zip(
+                    [(1 - alpha) * w for w in w_0], [alpha * w for w in w_1]
+                )
+            ]  # read from msave_path
             mod_1.set_weights(theta_a)
-            # mod_1.compile(optimizer=self.optimizer, loss=self.loss,
-            # metrics=['accuracy'])
             res = mod_1.evaluate(self.testdat, verbose=0)
             _test[i] = res[0]
             pb.update(i + 1)
-        self.i_data = _test # change returned val
-    
+        self.i_data = _test  # change returned val
+
     def interp_plot(self, *args, **kwargs):
         if np.any(self.i_data) == None:
-            self._interpolate() 
+            self._interpolate()
         fig = go.Figure(data=go.Scatter(x=self.alphas, y=self.i_data))
-        fig.update_layout(
-               *args, **kwargs)
+        fig.update_layout(*args, **kwargs)
         fig.show()
