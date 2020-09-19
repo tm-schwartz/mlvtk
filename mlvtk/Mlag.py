@@ -36,6 +36,7 @@ class Mlag:
         self.ydir = None  # y values of optimizer path
         self.evr = None  # explained variance ratio
         self.loss = None  # loss function
+        self.overwrite = None
         self.opt = None
         self.msave_path = pathlib.Path(msaver_path)  # path to save directory
         self._compatible = False  # are model checkpoints tf compatible
@@ -137,16 +138,25 @@ class Mlag:
             and self.msave_path.lstat().st_size
         ):
 
-            overwrite = input(f"{self.msave_path} is not empty, overwrite?")
-            while True:
-                if overwrite in ["no", "n"]:
+            if self.overwrite is not None:
+                if self.overwrite == True:
+                    shutil.rmtree(self.msave_path)
+                elif self.overwrite == False:
                     self.msave_path = input("Please enter new save folder path ")
                     self.msave_path = pathlib.Path(self.msave_path)
-                    break
-                elif overwrite in ["yes", "y"]:
-                    shutil.rmtree(self.msave_path)
-                    break
-                overwrite = input("please enter: yes/no/y/n")
+                   
+            else:
+                overwrite = input(f"{self.msave_path} is not empty, overwrite? (this message can be silenced by setting `overwrite=True/False`)")
+                while True:
+                    if overwrite in ["no", "n"]:
+                        self.msave_path = input("Please enter new save folder path ")
+                        self.msave_path = pathlib.Path(self.msave_path)
+                        break
+                    elif overwrite in ["yes", "y"]:
+                        shutil.rmtree(self.msave_path)
+                        break
+                    overwrite = input("please enter: yes/no/y/n")
+
 
         if not self.msave_path.is_dir():
             self.msave_path.mkdir(parents=True)
@@ -274,7 +284,8 @@ class Mlag:
 
         def _calc_loss(w):
             new_mod.set_weights(w)
-            return new_mod.evaluate(self.testdat, use_multiprocessing=True, verbose=0)
+            return new_mod.evaluate(self.testdat, use_multiprocessing=True,
+                    batch_size=batch_size, verbose=0)
 
         config = self.get_config()
 
@@ -285,7 +296,11 @@ class Mlag:
             config["class_name"] = "sequential"
             new_mod = tf.keras.Sequential.from_config(config)
             new_mod.build(input_shape=self.layers[0].input_shape)
-
+        if not isinstance(self.testdat, tf.data.Dataset):
+            batch_size=self.testdat[0].shape[0]           # TODO VERIFY
+        else:
+            batch_size = None
+            
         new_mod.compile(optimizer=self.opt, loss=self.loss)
 
         filters = filter_normalize()
@@ -486,7 +501,13 @@ class Mlag:
         w_1 = mod_1.get_weights()
         del mod_0
 
+        if not isinstance(self.testdat, tf.data.Dataset):
+            batch_size=self.testdat[0].shape[0]           # TODO VERIFY
+        else:
+            batch_size = None
+
         pb = tf.keras.utils.Progbar(self.alphas.shape[0], unit_name="alpha")
+
         for i, alpha in enumerate(self.alphas):
             theta_a = [
                 theta_0 + theta_1
@@ -495,7 +516,7 @@ class Mlag:
                 )
             ]  # read from msave_path
             mod_1.set_weights(theta_a)
-            res = mod_1.evaluate(self.testdat, verbose=0)
+            res = mod_1.evaluate(self.testdat, batch_size=batch_size, verbose=0)
             _test[i] = res[0]
             pb.update(i + 1)
         self.i_data = _test  # change returned val
