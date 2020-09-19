@@ -27,8 +27,8 @@ os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 class Mlag:
     def __init__(self, model, msaver_path):
-        self.alphas = np.linspace(-3, 3, 35)
-        self.betas = np.linspace(-3, 3, 35)
+        self.alphas = None
+        self.betas = None
         self.testdat = None  # test data set used to calculate loss vals
         self.loss_df = None  # pandas data frame containing loss vals
         self.i_data = None  # interpolated loss vals
@@ -376,6 +376,11 @@ class Mlag:
         self.xdir = xdir
         self.ydir = ydir
         self.evr = pca.explained_variance_ratio_
+
+        self.alphas = np.array(sorted([min(self.xdir)-1, *self.xdir,
+            max(self.xdir)+1]))[::-1]
+        self.betas = np.array(sorted([min(self.ydir)-1, *self.ydir,
+            max(self.ydir)+1]))[::-1]
 
         # to implement
         # self.alphas = np.concatenate([self.alphas, self.xdir])
