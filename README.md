@@ -1,6 +1,12 @@
 # MLVTK
 ### A loss surface visualization tool
 
+
+<img alt="Png" src="https://raw.githubusercontent.com/tm-schwartz/mlvtk/dev/visuals/adamstatic.png" width="60%" />
+
+_Simple DNN trained on Wine data set, using Adam optimizer_
+
+
 ## Why?
 
 - :shipit: **Simple**: A single line addition is all thats needed.
@@ -17,7 +23,7 @@ python | >= 3.6.0
 tensorflow | 2.3.x
 plotly | 4.9.0
 
-Install:
+Install locally (Also works in google Colab!):
 ```sh
 pip install mlvtk
 ```
