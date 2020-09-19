@@ -23,6 +23,7 @@ pip install mlvtk
 ```
 
 Optionally for use with jupyter notebook/lab:
+
 *Notebook*
 ---
 ```sh
