@@ -4,19 +4,22 @@ import itertools
 import os
 import pathlib
 import shutil
+import sys
+import logging
 
 import h5py
 import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import tensorflow as tf
+import tensorflow.python as tfp
 from plotly.subplots import make_subplots
-from sklearn.decomposition import PCA
+from sklearn.decomposition import FastICA, PCA
 
 from .CheckpointCallback import CheckpointCallback
 
-tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
-os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
+# tf.compat.v1.logging.set_verbosity(tf.compat.v1.logging.ERROR)
+# os.environ["TF_CPP_MIN_LOG_LEVEL"] = "3"
 
 """
     Base class containing custom code for loss surface visualization using filter
@@ -43,18 +46,19 @@ class Mlag:
         self._fit = model.fit
         self._compile = model.compile
         self._type = model.__class__
+        self._logger = logging.getLogger("MLAG")
 
         physical_devices = tf.config.list_physical_devices("GPU")
 
         if physical_devices:
             try:
                 tf.config.experimental.set_memory_growth(physical_devices[0], True)
-            except:
-                # Invalid device or cannot modify virtual devices once initialized.
+            except BaseException:
+                # Invalid device or cannot modify virtual devices once
+                # initialized.
                 pass
 
     def _tf_compatible(self):
-
         """
         Check if model checkpoints are compatible with tensorflow.keras
         loading. If not, then change `class_name` to be compatible.
@@ -62,7 +66,7 @@ class Mlag:
 
         self.msave_path = pathlib.Path(self.msave_path)
 
-        if self._type == tf.python.keras.engine.functional.Functional:
+        if self._type == tfp.keras.engine.functional.Functional:
             replacement = (
                 b'"class_name": "ModelVFunctional"',
                 b'"class_name": "Functional"',
@@ -92,13 +96,20 @@ class Mlag:
         Returns:
             model.compile(*args, **kwargs)
         """
-        self.opt = (
-            kwargs.get("optimizer") if kwargs.get("optimizer") != None else args[0]
-        ).__module__.split(".")[-1]
+
+        if kwargs.get("optimizer") is not None:
+            self.opt = kwargs.get("optimizer").__module__.split(".")[-1]
+
+        elif len(args):
+            self.opt = args[0]
+
+        else:
+            self.opt = "rmsprop"
+
         # compatibility with tf.keras.optimizer.get(...)
         if self.opt == "gradient_descent":
             self.opt = "SGD"
-        self.loss = kwargs.get("loss") if kwargs.get("loss") != None else args[1]
+        self.loss = kwargs.get("loss") if kwargs.get("loss") is not None else args[1]
 
         self._compile(*args, **kwargs)
         self._is_compiled = True
@@ -139,14 +150,16 @@ class Mlag:
         ):
 
             if self.overwrite is not None:
-                if self.overwrite == True:
+                if self.overwrite:
                     shutil.rmtree(self.msave_path)
                 elif self.overwrite == False:
                     self.msave_path = input("Please enter new save folder path ")
                     self.msave_path = pathlib.Path(self.msave_path)
-                   
+
             else:
-                overwrite = input(f"{self.msave_path} is not empty, overwrite? (this message can be silenced by setting `overwrite=True/False`)")
+                overwrite = input(
+                    f"{self.msave_path} is not empty, overwrite? (this message can be silenced by setting `overwrite=True/False`)"
+                )
                 while True:
                     if overwrite in ["no", "n"]:
                         self.msave_path = input("Please enter new save folder path ")
@@ -157,7 +170,6 @@ class Mlag:
                         break
                     overwrite = input("please enter: yes/no/y/n")
 
-
         if not self.msave_path.is_dir():
             self.msave_path.mkdir(parents=True)
 
@@ -166,7 +178,7 @@ class Mlag:
             kwargs["callbacks"].append(CheckpointCallback(path=self.msave_path))
         else:
             kwargs["callbacks"] = [CheckpointCallback(path=self.msave_path)]
-        if kwargs.get("validation_data") == None and len(args) < 8:
+        if kwargs.get("validation_data") is None and len(args) < 8:
             raise NotImplementedError("Need precomputed `validation_data`")
         self.testdat = kwargs.get("validation_data") if len(args) < 8 else args[7]
         return self._fit(*args, **kwargs)
@@ -215,10 +227,52 @@ class Mlag:
 
         self.msave_path = pathlib.Path(self.msave_path)
 
-        if self.xdir == None or self.ydir == None:
+        if self.xdir is None or self.ydir is None:
             self.gen_path()
 
         weights = np.asarray(self.get_weights())
+
+        if self.xdir.size == 1:
+            self.alphas = np.linspace(-5, 5, num=50, dtype=np.float32)
+
+            self.betas = np.linspace(-5, 5, num=50, dtype=np.float32)
+
+        elif self.xdir.size > 1:
+            self.betas = np.linspace(
+                self.ydir.min() - 1, self.ydir.max() + 1, num=50, dtype=np.float32
+            )
+
+            self.alphas = np.linspace(
+                self.xdir.min() - 1, self.xdir.max() +
+                1, num=50, dtype=np.float32
+            )
+
+        # For readability, make local vars
+        alph = self.alphas[None, :, None]  # [[[`val`], [`val`],...]]
+        bet = self.betas[:, None, None]  # [[[`val`]], [[`val`]]...]
+        bet_zeros = np.zeros_like(bet)
+        alph_zeros = np.zeros_like(alph)
+
+        # in order to construct cartesian product:
+        # take advantage of broadcasting with tf.add.
+        # example:::
+        # alphas.shape -> (50,)
+        # betas.shape -> (50,)
+        # alph.shape/alph_zeros.shape -> (1, 50, 1)
+        # bet.shape/bet_zeros.shape -> (50, 1, 1)
+        #
+        # By doing sum_alph = tf.add(alph, bet_zeros) and sum_bet = tf.add(bet, alph_zeros)
+        # we get two tensors of shape (50, 50, 1).
+        # Then we tf.concat([sum_alph, sum_bet], axis=2).
+        # By doing it along axis=2, we get pairs of values
+        # in shape (50, 50, 2). Finally, we use tf.reshape
+        # to get final cartesian product in result.shape = (2500, 2),
+        # so then result[i] == [`val_i_0`, `val_i_1`]
+        # adapted from https://stackoverflow.com/a/50195230
+        paramlist = np.reshape(
+            np.concatenate([alph + bet_zeros, alph_zeros + bet], axis=2),
+            (self.alphas.shape[0] * self.betas.shape[0], 2),
+        )
 
         def filter_normalize():
             delta = np.array(
@@ -231,7 +285,7 @@ class Mlag:
             )
 
             bn = filter(
-                lambda layer: layer.name == "batch_normalization",
+                lambda layer: "batch_normalization" in layer.name,
                 self.layers,
             )
             if bn:
@@ -239,13 +293,12 @@ class Mlag:
                     i = self.layers.index(layer)
                     delta[i] = np.zeros((delta[i].shape))
                     etta[i] = np.zeros((etta[i].shape))
-            paramlist = itertools.product(self.alphas, self.betas)
 
             def normalize_filter(fw):
                 f, w = fw
                 return f * np.array([(np.linalg.norm(w) / (np.linalg.norm(f) + 1e-10))])
 
-            result = np.array(
+            normalized_filter_array = np.array(
                 [
                     np.array(
                         [
@@ -262,64 +315,155 @@ class Mlag:
                 dtype="object",
             )
 
-            return result.reshape(
-                self.alphas.shape[0], self.betas.shape[0], len(weights)
+            optimizer_filter_array = np.array(
+                [
+                    np.array(
+                        [
+                            d0 * x + d1 * y
+                            for d0, d1 in zip(
+                                map(normalize_filter, zip(delta, weights)),
+                                map(normalize_filter, zip(etta, weights)),
+                            )
+                        ],
+                        dtype="object",
+                    )
+                    for x, y in zip(self.xdir, self.ydir)
+                ],
+                dtype="object",
             )
 
-        def gen_filter_final():
+            return (
+                normalized_filter_array.reshape(
+                    self.alphas.shape[0], self.betas.shape[0], len(weights)
+                ),
+                optimizer_filter_array,
+            )
+
+        def filter_generator():
             for ix, iy in itertools.product(
-                [*range(self.alphas.shape[0])], [*range(self.betas.shape[0])]
+                [*range(self.alphas.size)], [*range(self.betas.size)]
             ):
-                yield (ix, iy, filters[ix, iy])
+                yield normalized_filter_array[ix, iy]
+
+        def zdir_filter_generator():
+            for i in range(self.xdir.size):
+                yield optimizer_filter_array[i]
 
         def _calc_weights(data):
-            return (
-                data[0],
-                data[1],
-                np.array(
-                    [mw + data[2][k] for k, mw in enumerate(weights)],
-                    dtype="object",
-                ),
+            return np.array(
+                [mw + data[k] for k, mw in enumerate(weights)],
+                dtype="object",
             )
 
-        def _calc_loss(w):
-            new_mod.set_weights(w)
-            return new_mod.evaluate(self.testdat, use_multiprocessing=True,
-                    batch_size=batch_size, verbose=0)
+        normalized_filter_array, optimizer_filter_array = filter_normalize()
 
-        config = self.get_config()
+        def get_losses():
 
-        if self._type == tf.python.keras.engine.functional.Functional:
-            config["class_name"] = "Functional"
-            new_mod = tf.keras.Model.from_config(config)
-        elif self._type == tf.keras.Sequential:
-            config["class_name"] = "sequential"
-            new_mod = tf.keras.Sequential.from_config(config)
-            new_mod.build(input_shape=self.layers[0].input_shape)
-        if not isinstance(self.testdat, tf.data.Dataset):
-            batch_size=self.testdat[0].shape[0]           # TODO VERIFY
-        else:
-            batch_size = None
-            
-        new_mod.compile(optimizer=self.opt, loss=self.loss)
+            config = self.get_config()
 
-        filters = filter_normalize()
+            if self._type == tfp.keras.engine.functional.Functional:
+                config["class_name"] = "Functional"
+                new_mod = tf.keras.Model.from_config(config)
+            elif self._type == tf.keras.Sequential:
+                config["class_name"] = "sequential"
+                new_mod = tf.keras.Sequential.from_config(config)
+                new_mod.build(input_shape=self.layers[0].input_shape)
+            if not isinstance(self.testdat, tf.data.Dataset):
+                batch_size = self.testdat[0].shape[0]  # TODO VERIFY
+            else:
+                batch_size = None
 
-        df = pd.DataFrame(index=self.alphas, columns=self.betas)
+            new_mod.compile(optimizer=self.opt, loss=self.loss, run_eagerly=False)
 
-        prog_bar = tf.keras.utils.Progbar(
-            self.alphas.size * self.betas.size,
-            width=30,
-            verbose=1,
-            interval=0.05,
-            stateful_metrics=None,
-            unit_name="step",
+            direction_losses = np.zeros((self.xdir.size))
+
+            self._logger.setLevel(logging.INFO)
+            self._logger.info("Calculating z-values")
+            prog_bar = tf.keras.utils.Progbar(
+                self.xdir.size,
+                width=30,
+                verbose=1,
+                interval=0.05,
+                stateful_metrics=None,
+                unit_name="step",
+            )
+            with tf.device("/:GPU:0"):
+                for step, new_weights in enumerate(
+                    map(
+                        _calc_weights,
+                        zdir_filter_generator(),
+                    )
+                ):
+
+                    new_mod.set_weights(new_weights)
+
+                    l = new_mod.evaluate(
+                        self.testdat,
+                        use_multiprocessing=True,
+                        batch_size=None,
+                        verbose=0,
+                    )
+
+                    direction_losses[step] = l
+
+                    prog_bar.update(step + 1)
+
+            self.zdir = direction_losses
+
+            losses = np.zeros((self.alphas.size * self.betas.size))
+
+            if self._type == tfp.keras.engine.functional.Functional:
+                config["class_name"] = "Functional"
+                new_mod = tf.keras.Model.from_config(config)
+            elif self._type == tf.keras.Sequential:
+                config["class_name"] = "sequential"
+                new_mod = tf.keras.Sequential.from_config(config)
+                new_mod.build(input_shape=self.layers[0].input_shape)
+            if not isinstance(self.testdat, tf.data.Dataset):
+                batch_size = self.testdat[0].shape[0]  # TODO VERIFY
+            else:
+                batch_size = None
+
+            new_mod.compile(optimizer=self.opt, loss=self.loss, run_eagerly=False)
+
+            self._logger.info("Calculating surface values")
+            prog_bar = tf.keras.utils.Progbar(
+                self.alphas.size * self.betas.size,
+                width=30,
+                verbose=1,
+                interval=0.05,
+                stateful_metrics=None,
+                unit_name="step",
+            )
+            with tf.device("/:GPU:0"):  # TODO recode with tf.ops
+                for step, new_weights in enumerate(
+                    map(
+                        _calc_weights,
+                        filter_generator(),
+                    )
+                ):
+
+                    new_mod.set_weights(new_weights)
+
+                    l = new_mod.evaluate(
+                        self.testdat,
+                        use_multiprocessing=False,
+                        batch_size=None,
+                        verbose=0,
+                    )
+
+                    losses[step] = l
+                    prog_bar.update(step + 1)
+
+            return losses
+
+        raw_losses = get_losses()
+
+        self.loss_df = pd.DataFrame(
+            data=raw_losses.reshape(self.alphas.size, self.betas.size),
+            index=self.alphas,
+            columns=self.betas,
         )
-        with tf.device("/:GPU:0"):
-            for step, new_weights in enumerate(map(_calc_weights, gen_filter_final())):
-                df.iloc[new_weights[0], new_weights[1]] = _calc_loss(new_weights[2])
-                prog_bar.update(step + 1)
-        self.loss_df = df
 
     def gen_path(self, res=1):
         self.msave_path = pathlib.Path(self.msave_path)
@@ -372,13 +516,26 @@ class Mlag:
             y = project_1d_tf(d, dy)
             return x, y
 
+        # TODO: check nans infs
+        # ica = FastICA(n_components=2, fun="logcosh", max_iter=800)
         pca = PCA(n_components=2)
-        T0 = [tensorlist_to_tensor_tf(i) for i in weight_differences_btw_epochs]
-        pca.fit(np.array(T0))
+        T0 = np.array(
+            [tensorlist_to_tensor_tf(i) for i in weight_differences_btw_epochs]
+        )
+        xdir, ydir = [], []
+
+        if not np.any(T0):
+            self.xdir = np.array([0])
+            self.ydir = np.array([0])
+            self._logger.setLevel(logging.WARNING)
+            self._logger.warning("No weight change between epochs")
+            self.evr = [pd.NA, pd.NA]
+            return
+
+        pca.fit(T0)
         pca_1 = pca.components_[0]
         pca_2 = pca.components_[1]
 
-        xdir, ydir = [], []
         for ep in T0:
             xd, yd = project_2d_tf(
                 ep,
@@ -388,95 +545,46 @@ class Mlag:
             xdir.append(xd)
             ydir.append(yd)
 
-        self.xdir = xdir
-        self.ydir = ydir
+        self.xdir = np.array(xdir)
+        self.ydir = np.array(ydir)
         self.evr = pca.explained_variance_ratio_
 
-        self.alphas = np.array(sorted([min(self.xdir)-1, *self.xdir,
-            max(self.xdir)+1]))[::-1]
-        self.betas = np.array(sorted([min(self.ydir)-1, *self.ydir,
-            max(self.ydir)+1]))[::-1]
-
-        # to implement
-        # self.alphas = np.concatenate([self.alphas, self.xdir])
-        # self.betas = np.concatenate([self.betas, self.ydir])
-        # self.alphas.sort()
-        # self.betas.sort()
-
-    def surface_plot(
-        self, title_text=None, save_file=None, approximate_model_path=True
-    ):
+    def surface_plot(self, title_text=None, save_file=None, return_traces=False):
 
         self.msave_path = pathlib.Path(self.msave_path)
 
-        if np.any(self.loss_df) == None:
+        if np.any(self.loss_df) is None:
             self._calculate_loss()
-
-        if self.xdir == None or self.ydir == None:
-            self.gen_path()
-
         # TODO: fix title of plot
-        fig = make_subplots(
-            rows=1,
-            cols=1,
-            specs=[[{"is_3d": True}]],
-            subplot_titles=[
-                f"Component 1 EVR: {self.evr[0]:.4f}, Component 2 EVR: {self.evr[1]:.4f}"
-            ],
+
+        surface_trace = go.Surface(
+            x=self.loss_df.index,
+            y=self.loss_df.columns,
+            z=self.loss_df.values,
+            opacity=0.9,
+            coloraxis="coloraxis",
+            lighting=dict(ambient=0.6, roughness=0.9, diffuse=0.5, fresnel=2),
         )
 
-        if approximate_model_path:
-
-            xs = [
-                self.loss_df.index[i]
-                if i < self.loss_df.index.shape[0]
-                else self.loss_df.index[i - 1]
-                for i in np.digitize(self.xdir, self.loss_df.index, right=True)
-            ]
-            ys = [
-                self.loss_df.columns[i]
-                if i < self.loss_df.columns.shape[0]
-                else self.loss_df.columns[i - 1]
-                for i in np.digitize(self.ydir, self.loss_df.columns, right=True)
-            ]
-
-            zs = [self.loss_df.loc[x, y] for x, y in zip(xs, ys)]
-
-        else:
-            raise NotImplementedError()
-            # zs = [self.loss_df.loc[x, y] for x, y in zip(self.xdir, self.ydir)]
-
-        fig.add_trace(
-            go.Surface(
-                x=self.loss_df.index,
-                y=self.loss_df.columns,
-                z=self.loss_df.values,
-                opacity=0.9,
-                showscale=True,
-                lighting=dict(ambient=0.6, roughness=0.9, diffuse=0.5, fresnel=2),
-                colorscale="haline_r",
-                colorbar=dict(lenmode="pixels", len=400),
-            ),
-            row=1,
-            col=1,
-        )
-        fig.add_scatter3d(
+        scatter_trace = go.Scatter3d(
             x=self.xdir,
             y=self.ydir,
-            z=zs,
+            z=self.zdir,
             marker=dict(size=2, color="red"),
             line=dict(color="darkblue", width=2),
             showlegend=True,
             name="opt path",
-            row=1,
-            col=1,
         )
 
         if title_text:
             title = dict(text=title_text, x=0.7)
         else:
-            title = None
+            title = f"Component 1 EVR: {self.evr[0]:.4f}, Component 2 EVR: {self.evr[1]:.4f}"
 
+        if return_traces:
+            return [surface_trace, scatter_trace]
+
+        fig = go.Figure(data=[surface_trace, scatter_trace])
         fig.update_layout(
             title=title,
             autosize=False,
@@ -484,13 +592,14 @@ class Mlag:
             height=900,
             margin=dict(l=10),
             bargap=0.2,
+            coloraxis=dict(colorscale="haline_r"),
         )
-        fig.show()
         if save_file is not None:
             fig.write_html(f"{save_file}.html")
+        return fig
 
     def _interpolate(self):
-        _test = np.zeros(self.alphas.shape[0])
+        _test = np.zeros(self.alphas.size)
         f_list = sorted(
             self.msave_path.glob(r"model_[0-9]*"),
             key=lambda x: int(x.parts[-1].split("_")[-1][:-3]),
@@ -502,11 +611,11 @@ class Mlag:
         del mod_0
 
         if not isinstance(self.testdat, tf.data.Dataset):
-            batch_size=self.testdat[0].shape[0]           # TODO VERIFY
+            batch_size = self.testdat[0].shape[0]  # TODO VERIFY
         else:
             batch_size = None
 
-        pb = tf.keras.utils.Progbar(self.alphas.shape[0], unit_name="alpha")
+        pb = tf.keras.utils.Progbar(self.alphas.size, unit_name="alpha")
 
         for i, alpha in enumerate(self.alphas):
             theta_a = [
@@ -522,8 +631,8 @@ class Mlag:
         self.i_data = _test  # change returned val
 
     def interp_plot(self, *args, **kwargs):
-        if np.any(self.i_data) == None:
+        if np.any(self.i_data) is None:
             self._interpolate()
         fig = go.Figure(data=go.Scatter(x=self.alphas, y=self.i_data))
         fig.update_layout(*args, **kwargs)
-        fig.show()
+        return fig

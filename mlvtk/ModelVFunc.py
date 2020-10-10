@@ -1,13 +1,13 @@
 # cspell: disable
 from .Mlag import Mlag
-import tensorflow as tf
+import tensorflow.python as tfp
 
 """
     Provide support for functional model method calls
 """
 
 
-class ModelVFunc(Mlag, tf.python.keras.engine.functional.Functional):
+class ModelVFunc(Mlag, tfp.keras.engine.functional.Functional):
     def __init__(self, model, msaver_path="vwd"):
         """
         Args:
@@ -16,6 +16,6 @@ class ModelVFunc(Mlag, tf.python.keras.engine.functional.Functional):
             checkpoints in
         """
         Mlag.__init__(self, model, msaver_path)
-        tf.python.keras.engine.functional.Functional.__init__(
+        tfp.keras.engine.functional.Functional.__init__(
             self, model.inputs, model.outputs, model.name, model.trainable
         )
