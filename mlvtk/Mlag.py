@@ -29,7 +29,7 @@ from .CheckpointCallback import CheckpointCallback
 
 
 class Mlag:
-    def __init__(self, model, msaver_path):
+    def __init__(self, model, msaver_path, verbose):
         self.alphas = None
         self.betas = None
         self.testdat = None  # test data set used to calculate loss vals
@@ -47,6 +47,7 @@ class Mlag:
         self._compile = model.compile
         self._type = model.__class__
         self._logger = logging.getLogger("MLAG")
+        self.verbose = verbose
 
         physical_devices = tf.config.list_physical_devices("GPU")
 
@@ -183,41 +184,64 @@ class Mlag:
         self.testdat = kwargs.get("validation_data") if len(args) < 8 else args[7]
         return self._fit(*args, **kwargs)
 
-    def _calculate_loss(self):
+    def _new_model(self):
+        """ create a new model for evaluation """
+
+        config = self.get_config()
+        if self._type == tfp.keras.engine.functional.Functional:
+            config["class_name"] = "Functional"
+            new_mod = tf.keras.Model.from_config(config)
+        elif self._type == tf.keras.Sequential:
+            config["class_name"] = "sequential"
+            new_mod = tf.keras.Sequential.from_config(config)
+            new_mod.build(input_shape=self.layers[0].input_shape)
+
+        new_mod.compile(optimizer=self.opt, loss=self.loss, run_eagerly=False)
+
+        return new_mod
+
+    def _evaluate_batch_size(self):
+        if not isinstance(self.testdat, tf.data.Dataset):
+            batch_size = self.testdat[0].shape[0]
+        else:
+            batch_size = None
+        return batch_size
+
+    def _calculate_loss(self, alpha_size, beta_size):
         """
           Create pandas dataframe containing loss values found on loss surface
           of model. If `self.alphas` and `self.betas` are centered at 0, then
           (0,0) represents final loss of model on `validation_data`.
 
-          -5   -4   -3    -2    -1    0    1    2    3    4    5   <- alphas
-          -------------------------------------------------------   _ betas
+          -5   -4   -3    -2    -1    0    1    2    3    4    5   <- betas
+          -------------------------------------------------------   _ alphas
         -5|                                                     |  v
-          |                                                     |
-          |                                                     |
-        -4|                                                     |
-          |                                                     |
-          |                                                     |
-        -3|                                                     |
-          |                                                     |
-          |                                                     |
-        -2|                                                     |
-          |                                                     |
-          |                                                     |
-        -1|                                                     |
-          |                                                     |
-          |                                                     |
-         0|                           +                         |  + -> final
-          |                                                     |       loss
-          |                                                     |       of
-         1|                                                     |       model
-          |                                                     |
-          |                                                     |
-         2|                                                     |
-          |                                                     |
-          |                                                     |
-         3|                                                     |
-          |                                                     |
-          |                                                     |
+          |                  _________                          |
+          |          _______/   ....  \  <-- loss surface       |
+        -4|       __|..................\                        |
+          |      /....., , .............---__                   |
+          |     /......., ,..................\                  |
+        -3|    |........., ,..................\                 |
+          |    |.........., ,..................-_               |
+          |    |..........,,,....................\              |
+        -2|    \..........,,,.....................\             |
+          |     \..........,,.....................|             |
+          |      \.........,,,....................|             |
+        -1|       \..........,,....,,,,,,, ,......|             |
+          |        \.........., ,,,,******, ,......--_          |
+          |         \...........,,  **  ****,.........|         |
+         0|      ____\............,*  +  *** ,........|         |  + -> final
+          |     /..................,*    ***,.........|         |       loss
+          |    /....................,******,..........|         |       of
+         1|   /......................,,,,,,.........../         |       model
+          |  /......................................./          |
+          | /......................................./           |
+         2| |....................................../            |
+          | |...................................../             |
+          | |.................................._--              |
+         3| \................................./                 |
+          |  \_----____.......... ___________/                  |
+          |            \_________/                              |
          4|                                                     |
           |                                                     |
           |                                                     |
@@ -233,18 +257,30 @@ class Mlag:
         weights = np.asarray(self.get_weights())
 
         if self.xdir.size == 1:
-            self.alphas = np.linspace(-5, 5, num=50, dtype=np.float32)
+            self.alphas = np.linspace(-5, 5, num=alpha_size, dtype=np.float32)
 
-            self.betas = np.linspace(-5, 5, num=50, dtype=np.float32)
+            self.betas = np.linspace(-5, 5, num=beta_size, dtype=np.float32)
 
         elif self.xdir.size > 1:
-            self.betas = np.linspace(
-                self.ydir.min() - 1, self.ydir.max() + 1, num=50, dtype=np.float32
-            )
+            one_std_alphas = (self.xdir.mean() + self.xdir.std()) - (
+                self.xdir.mean() - self.xdir.std()
+            ) * 0.5
+            one_std_betas = (self.ydir.mean() + self.ydir.std()) - (
+                self.ydir.mean() - self.ydir.std()
+            ) * 0.5
 
             self.alphas = np.linspace(
-                self.xdir.min() - 1, self.xdir.max() +
-                1, num=50, dtype=np.float32
+                self.xdir.min() - one_std_alphas,
+                self.xdir.max() + one_std_alphas,
+                num=alpha_size,
+                dtype=np.float32,
+            )
+
+            self.betas = np.linspace(
+                self.ydir.min() - one_std_betas,
+                self.ydir.max() + one_std_betas,
+                num=beta_size,
+                dtype=np.float32,
             )
 
         # For readability, make local vars
@@ -359,101 +395,77 @@ class Mlag:
 
         def get_losses():
 
-            config = self.get_config()
-
-            if self._type == tfp.keras.engine.functional.Functional:
-                config["class_name"] = "Functional"
-                new_mod = tf.keras.Model.from_config(config)
-            elif self._type == tf.keras.Sequential:
-                config["class_name"] = "sequential"
-                new_mod = tf.keras.Sequential.from_config(config)
-                new_mod.build(input_shape=self.layers[0].input_shape)
-            if not isinstance(self.testdat, tf.data.Dataset):
-                batch_size = self.testdat[0].shape[0]  # TODO VERIFY
-            else:
-                batch_size = None
-
-            new_mod.compile(optimizer=self.opt, loss=self.loss, run_eagerly=False)
+            new_mod = self._new_model()
+            batch_size = self._evaluate_batch_size()
 
             direction_losses = np.zeros((self.xdir.size))
 
-            self._logger.setLevel(logging.INFO)
+            if self.verbose:
+                self._logger.setLevel(logging.INFO)
             self._logger.info("Calculating z-values")
             prog_bar = tf.keras.utils.Progbar(
                 self.xdir.size,
                 width=30,
-                verbose=1,
+                verbose=self.verbose,
                 interval=0.05,
                 stateful_metrics=None,
                 unit_name="step",
             )
-            with tf.device("/:GPU:0"):
-                for step, new_weights in enumerate(
-                    map(
-                        _calc_weights,
-                        zdir_filter_generator(),
-                    )
-                ):
+            #            with tf.device("/:GPU:0"):
+            for step, new_weights in enumerate(
+                map(
+                    _calc_weights,
+                    zdir_filter_generator(),
+                )
+            ):
 
-                    new_mod.set_weights(new_weights)
+                new_mod.set_weights(new_weights)
 
-                    l = new_mod.evaluate(
-                        self.testdat,
-                        use_multiprocessing=True,
-                        batch_size=None,
-                        verbose=0,
-                    )
+                l = new_mod.evaluate(
+                    self.testdat,
+                    use_multiprocessing=True,
+                    batch_size=batch_size,
+                    verbose=0,
+                )
 
-                    direction_losses[step] = l
+                direction_losses[step] = l
 
-                    prog_bar.update(step + 1)
+                prog_bar.update(step + 1)
 
             self.zdir = direction_losses
 
             losses = np.zeros((self.alphas.size * self.betas.size))
 
-            if self._type == tfp.keras.engine.functional.Functional:
-                config["class_name"] = "Functional"
-                new_mod = tf.keras.Model.from_config(config)
-            elif self._type == tf.keras.Sequential:
-                config["class_name"] = "sequential"
-                new_mod = tf.keras.Sequential.from_config(config)
-                new_mod.build(input_shape=self.layers[0].input_shape)
-            if not isinstance(self.testdat, tf.data.Dataset):
-                batch_size = self.testdat[0].shape[0]  # TODO VERIFY
-            else:
-                batch_size = None
-
-            new_mod.compile(optimizer=self.opt, loss=self.loss, run_eagerly=False)
+            new_mod = self._new_model()
 
             self._logger.info("Calculating surface values")
             prog_bar = tf.keras.utils.Progbar(
                 self.alphas.size * self.betas.size,
                 width=30,
-                verbose=1,
+                verbose=self.verbose,
                 interval=0.05,
                 stateful_metrics=None,
                 unit_name="step",
             )
-            with tf.device("/:GPU:0"):  # TODO recode with tf.ops
-                for step, new_weights in enumerate(
-                    map(
-                        _calc_weights,
-                        filter_generator(),
-                    )
-                ):
+            # with tf.device("/:GPU:0"):
+            for step, new_weights in enumerate(
+                map(
+                    _calc_weights,
+                    filter_generator(),
+                )
+            ):
 
-                    new_mod.set_weights(new_weights)
+                new_mod.set_weights(new_weights)
 
-                    l = new_mod.evaluate(
-                        self.testdat,
-                        use_multiprocessing=False,
-                        batch_size=None,
-                        verbose=0,
-                    )
+                l = new_mod.evaluate(
+                    self.testdat,
+                    use_multiprocessing=True,
+                    batch_size=batch_size,
+                    verbose=0,
+                )
 
-                    losses[step] = l
-                    prog_bar.update(step + 1)
+                losses[step] = l
+                prog_bar.update(step + 1)
 
             return losses
 
@@ -465,7 +477,7 @@ class Mlag:
             columns=self.betas,
         )
 
-    def gen_path(self, res=1):
+    def gen_path(self):
         self.msave_path = pathlib.Path(self.msave_path)
         assert (
             self.msave_path.is_dir()
@@ -549,12 +561,19 @@ class Mlag:
         self.ydir = np.array(ydir)
         self.evr = pca.explained_variance_ratio_
 
-    def surface_plot(self, title_text=None, save_file=None, return_traces=False):
+    def surface_plot(
+        self,
+        title_text=None,
+        save_file=None,
+        return_traces=False,
+        alpha_size=50,
+        beta_size=50,
+    ):
 
         self.msave_path = pathlib.Path(self.msave_path)
 
         if np.any(self.loss_df) is None:
-            self._calculate_loss()
+            self._calculate_loss(alpha_size, beta_size)
         # TODO: fix title of plot
 
         surface_trace = go.Surface(
@@ -596,6 +615,10 @@ class Mlag:
         )
         if save_file is not None:
             fig.write_html(f"{save_file}.html")
+
+        if return_traces:
+            return [surface_trace, scatter_trace]
+
         return fig
 
     def _interpolate(self):
@@ -610,10 +633,7 @@ class Mlag:
         w_1 = mod_1.get_weights()
         del mod_0
 
-        if not isinstance(self.testdat, tf.data.Dataset):
-            batch_size = self.testdat[0].shape[0]  # TODO VERIFY
-        else:
-            batch_size = None
+        batch_size = self._evaluate_batch_size()
 
         pb = tf.keras.utils.Progbar(self.alphas.size, unit_name="alpha")
 
