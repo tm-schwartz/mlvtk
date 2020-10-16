@@ -1,4 +1,4 @@
-# MLVTK  ![PyPI - Python Version](https://img.shields.io/pypi/pyversions/mlvtk?style=plastic) ![PyPI](https://img.shields.io/pypi/v/mlvtk?style=plastic)
+# MLVTK  [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/mlvtk?style=plastic)](https://badge.fury.io/py/mlvtk) [![PyPI](https://img.shields.io/pypi/v/mlvtk?style=plastic)](https://badge.fury.io/py/mlvtk)
 ### A loss surface visualization tool
 
 
