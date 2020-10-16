@@ -207,7 +207,7 @@ class Mlag:
             batch_size = None
         return batch_size
 
-    def _calculate_loss(self, alpha_size, beta_size):
+    def _calculate_loss(self, alpha_size, beta_size, ext):
         """
           Create pandas dataframe containing loss values found on loss surface
           of model. If `self.alphas` and `self.betas` are centered at 0, then
@@ -262,23 +262,30 @@ class Mlag:
             self.betas = np.linspace(-5, 5, num=beta_size, dtype=np.float32)
 
         elif self.xdir.size > 1:
-            one_std_alphas = (self.xdir.mean() + self.xdir.std()) - (
-                self.xdir.mean() - self.xdir.std()
-            ) * 0.5
-            one_std_betas = (self.ydir.mean() + self.ydir.std()) - (
-                self.ydir.mean() - self.ydir.std()
-            ) * 0.5
+            if ext == "std":
+                diff_alphas = (self.xdir.mean() + self.xdir.std()) - (
+                    self.xdir.mean() - self.xdir.std()
+                ) * 0.5
+                diff_betas = (self.ydir.mean() + self.ydir.std()) - (
+                    self.ydir.mean() - self.ydir.std()
+                ) * 0.5
+
+            elif ext == 1:
+                diff_alphas = diff_betas = 1
+
+            else:
+                diff_alphas, diff_betas = ext
 
             self.alphas = np.linspace(
-                self.xdir.min() - one_std_alphas,
-                self.xdir.max() + one_std_alphas,
+                self.xdir.min() - diff_alphas,
+                self.xdir.max() + diff_alphas,
                 num=alpha_size,
                 dtype=np.float32,
             )
 
             self.betas = np.linspace(
-                self.ydir.min() - one_std_betas,
-                self.ydir.max() + one_std_betas,
+                self.ydir.min() - diff_betas,
+                self.ydir.max() + diff_betas,
                 num=beta_size,
                 dtype=np.float32,
             )
@@ -528,7 +535,6 @@ class Mlag:
             y = project_1d_tf(d, dy)
             return x, y
 
-        # TODO: check nans infs
         # ica = FastICA(n_components=2, fun="logcosh", max_iter=800)
         pca = PCA(n_components=2)
         T0 = np.array(
@@ -568,13 +574,15 @@ class Mlag:
         return_traces=False,
         alpha_size=50,
         beta_size=50,
+        ext=1,
+        show_arrow=False,
+        recalc=False
     ):
 
         self.msave_path = pathlib.Path(self.msave_path)
 
-        if np.any(self.loss_df) is None:
-            self._calculate_loss(alpha_size, beta_size)
-        # TODO: fix title of plot
+        if np.any(self.loss_df) is None or recalc:
+            self._calculate_loss(alpha_size, beta_size, ext)
 
         surface_trace = go.Surface(
             x=self.loss_df.index,
@@ -583,25 +591,25 @@ class Mlag:
             opacity=0.9,
             coloraxis="coloraxis",
             lighting=dict(ambient=0.6, roughness=0.9, diffuse=0.5, fresnel=2),
+            name=f"loss surface"
         )
 
         scatter_trace = go.Scatter3d(
             x=self.xdir,
             y=self.ydir,
             z=self.zdir,
-            marker=dict(size=2, color="red"),
+            marker=dict(symbol='circle', size=2, color="rgba(256, 0, 0, 80)"),
             line=dict(color="darkblue", width=2),
             showlegend=True,
-            name="opt path",
+            name=f"{self.opt} path",
         )
 
-        if title_text:
-            title = dict(text=title_text, x=0.7)
-        else:
-            title = f"Component 1 EVR: {self.evr[0]:.4f}, Component 2 EVR: {self.evr[1]:.4f}"
+        title = f"Component 1 EVR: {self.evr[0]:.4f}, Component 2 EVR: {self.evr[1]:.4f}"
 
-        if return_traces:
-            return [surface_trace, scatter_trace]
+        if title_text[0] == '+':
+            title = dict(text=f"{title_text[1:]}, Component 1 EVR: {self.evr[0]:.4f}, Component 2 EVR: {self.evr[1]:.4f}", x=0.5)
+        elif title_text:
+            title = dict(text=title_text, x=0.7)
 
         fig = go.Figure(data=[surface_trace, scatter_trace])
         fig.update_layout(
@@ -611,10 +619,17 @@ class Mlag:
             height=900,
             margin=dict(l=10),
             bargap=0.2,
-            coloraxis=dict(colorscale="haline_r"),
+            coloraxis=dict(colorscale="haline_r", colorbar=dict(title="Loss Surface Value", len=.95)),
         )
+        if show_arrow:
+            fig.update_layout(scene=dict(annotations=[dict(showarrow=True, x=self.xdir[0], y=self.ydir[0],
+                z=self.zdir[0], text='Start'), dict(showarrow=True,
+                    x=self.xdir[-1], y=self.ydir[-1], z=self.zdir[-1],
+                    text='End')]))
+
         if save_file is not None:
             fig.write_html(f"{save_file}.html")
+           # fig.write_image(f"{save_file}.svg")
 
         if return_traces:
             return [surface_trace, scatter_trace]
