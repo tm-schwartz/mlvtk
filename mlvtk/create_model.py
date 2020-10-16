@@ -1,5 +1,6 @@
 # cspell: disable
 import tensorflow as tf
+import tensorflow.python as tfp
 
 from .ModelVFunc import ModelVFunc
 from .ModelVSeq import ModelVSeq
@@ -22,7 +23,7 @@ def create_model(model):
     """
     if isinstance(model, tf.keras.Sequential):
         return ModelVSeq(model)
-    elif isinstance(model, tf.python.keras.engine.functional.Functional):
+    elif isinstance(model, tfp.keras.engine.functional.Functional):
         return ModelVFunc(model)
     else:
         raise NotImplementedError("Only Sequential and Functional models are supported")
