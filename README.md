@@ -2,9 +2,21 @@
 ### A loss surface visualization tool
 
 
-<img alt="Png" src="https://raw.githubusercontent.com/tm-schwartz/mlvtk/dev/visuals/adamstatic.png" width="60%" />
+<img alt="Png" src="https://raw.githubusercontent.com/tm-schwartz/mlvtk/visuals/adamax.png" width="60%" />
 
-_Simple DNN trained on Wine data set, using Adam optimizer_
+_Simple DNN trained on MNIST data set, using Adamax optimizer_
+
+
+<img alt="Gif" src="https://raw.githubusercontent.com/tm-schwartz/mlvtk/visuals/gifs/adam1.gif" width="40%" />  <img alt="Gif" src="https://raw.githubusercontent.com/tm-schwartz/mlvtk/visuals/adam2.png" width="40%" />
+
+_Simple DNN trained on MNIST, using Adam optimizer, with different learning rate_
+
+
+<img alt="Gif" src="https://raw.githubusercontent.com/tm-schwartz/mlvtk/visuals/gifs/sgd1.gif" width="60%" />
+
+_Simple DNN trained on MNIST, using SGD optimizer_
+
+
 
 
 ## Why?
