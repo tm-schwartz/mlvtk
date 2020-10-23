@@ -48,7 +48,7 @@ class Mlag:
         self._type = model.__class__
         self._logger = logging.getLogger("MLAG")
         self.verbose = verbose
-
+        self.pca_dirs = None
         physical_devices = tf.config.list_physical_devices("GPU")
 
         if physical_devices:
@@ -207,7 +207,7 @@ class Mlag:
             batch_size = None
         return batch_size
 
-    def _calculate_loss(self, alpha_size, beta_size, ext):
+    def _calculate_loss(self, alpha_size, beta_size, ext, random_dirs):
         """
           Create pandas dataframe containing loss values found on loss surface
           of model. If `self.alphas` and `self.betas` are centered at 0, then
@@ -317,16 +317,29 @@ class Mlag:
             (self.alphas.shape[0] * self.betas.shape[0], 2),
         )
 
-        def filter_normalize():
-            delta = np.array(
-                [np.reshape(np.random.randn(ww.size), ww.shape) for ww in weights],
-                dtype="object",
-            )
-            etta = np.array(
-                [np.reshape(np.random.randn(ww.size), ww.shape) for ww in weights],
-                dtype="object",
-            )
+        def reshape(values):
+            s = 0
+            for w in weights:
+                yield np.reshape(values[s : s + w.size], w.shape)
+                s += w.size
 
+        def filter_normalize():
+            """
+            if random_dirs:
+                delta = np.array(
+                    [np.reshape(np.random.randn(ww.size), ww.shape) for ww in weights],
+                    dtype="object",
+                )
+                etta = np.array(
+                    [np.reshape(np.random.randn(ww.size), ww.shape) for ww in weights],
+                    dtype="object",
+                )
+
+            else:
+            """
+            pd, pe = self.pca_dirs
+            delta = np.array([pca_delta for pca_delta in reshape(pd)])
+            etta = np.array([pca_etta for pca_etta in reshape(pe)])
             bn = filter(
                 lambda layer: "batch_normalization" in layer.name,
                 self.layers,
@@ -553,6 +566,7 @@ class Mlag:
         pca.fit(T0)
         pca_1 = pca.components_[0]
         pca_2 = pca.components_[1]
+        self.pca_dirs = [pca_1, pca_2]
 
         for ep in T0:
             xd, yd = project_2d_tf(
@@ -576,13 +590,14 @@ class Mlag:
         beta_size=50,
         ext=1,
         show_arrow=False,
-        recalc=False
+        recalc=False,
+        random_dirs=False,
     ):
 
         self.msave_path = pathlib.Path(self.msave_path)
 
         if np.any(self.loss_df) is None or recalc:
-            self._calculate_loss(alpha_size, beta_size, ext)
+            self._calculate_loss(alpha_size, beta_size, ext, random_dirs)
 
         surface_trace = go.Surface(
             x=self.loss_df.index,
@@ -591,25 +606,35 @@ class Mlag:
             opacity=0.9,
             coloraxis="coloraxis",
             lighting=dict(ambient=0.6, roughness=0.9, diffuse=0.5, fresnel=2),
-            name=f"loss surface"
+            name=f"loss surface",
         )
 
         scatter_trace = go.Scatter3d(
             x=self.xdir,
             y=self.ydir,
             z=self.zdir,
-            marker=dict(symbol='circle', size=2, color="rgba(256, 0, 0, 80)"),
+            marker=dict(symbol="circle", size=2, color="rgba(256, 0, 0, 80)"),
             line=dict(color="darkblue", width=2),
             showlegend=True,
             name=f"{self.opt} path",
         )
 
-        title = f"Component 1 EVR: {self.evr[0]:.4f}, Component 2 EVR: {self.evr[1]:.4f}"
+        title = (
+            f"Component 1 EVR: {self.evr[0]:.4f}, Component 2 EVR: {self.evr[1]:.4f}"
+        )
 
-        if title_text[0] == '+':
-            title = dict(text=f"{title_text[1:]}, Component 1 EVR: {self.evr[0]:.4f}, Component 2 EVR: {self.evr[1]:.4f}", x=0.5)
-        elif title_text:
-            title = dict(text=title_text, x=0.7)
+        # TODO: refactor title
+
+        if title_text:
+            if title_text[0] == "+":
+                title = dict(
+                    text=f"{title_text[1:]}, Component 1 EVR: {self.evr[0]:.4f}, Component 2 EVR: {self.evr[1]:.4f}",
+                    x=0.5,
+                )
+            else:
+                title = dict(text=title_text, x=0.7)
+        else:
+            title = dict(text=title, x=0.7)
 
         fig = go.Figure(data=[surface_trace, scatter_trace])
         fig.update_layout(
@@ -619,17 +644,36 @@ class Mlag:
             height=900,
             margin=dict(l=10),
             bargap=0.2,
-            coloraxis=dict(colorscale="haline_r", colorbar=dict(title="Loss Surface Value", len=.95)),
+            coloraxis=dict(
+                colorscale="haline_r",
+                colorbar=dict(title="Loss Surface Value", len=0.95),
+            ),
         )
         if show_arrow:
-            fig.update_layout(scene=dict(annotations=[dict(showarrow=True, x=self.xdir[0], y=self.ydir[0],
-                z=self.zdir[0], text='Start'), dict(showarrow=True,
-                    x=self.xdir[-1], y=self.ydir[-1], z=self.zdir[-1],
-                    text='End')]))
+            fig.update_layout(
+                scene=dict(
+                    annotations=[
+                        dict(
+                            showarrow=True,
+                            x=self.xdir[0],
+                            y=self.ydir[0],
+                            z=self.zdir[0],
+                            text="Start",
+                        ),
+                        dict(
+                            showarrow=True,
+                            x=self.xdir[-1],
+                            y=self.ydir[-1],
+                            z=self.zdir[-1],
+                            text="End",
+                        ),
+                    ]
+                )
+            )
 
         if save_file is not None:
             fig.write_html(f"{save_file}.html")
-           # fig.write_image(f"{save_file}.svg")
+        # fig.write_image(f"{save_file}.svg")
 
         if return_traces:
             return [surface_trace, scatter_trace]
