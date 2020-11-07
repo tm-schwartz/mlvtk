@@ -1,15 +1,16 @@
 import pathlib
-from typing import List, Generator, Union
+from typing import Generator, List, Tuple, Union
+
 import h5py
 import numpy as np
-from ..Model import Model
 from sklearn.decomposition import PCA
+
+from ..Model import Model
 
 
 class CalcTrajectory:
-    @staticmethod
-    # TODO ADD ARGUMENTS
     def _build_item_list(
+        self,
         directory: List[pathlib.Path],
     ) -> List[List[np.ndarray]]:
         # return list of list of numpy arrays.
@@ -28,6 +29,8 @@ class CalcTrajectory:
             h5obj.visititems(_filter_datasets)
             model_list.append(model_layers)
             h5obj.close()
+
+        self.dims = [(*i.shape, np.prod(i.shape)) for i in model_list[0]]
 
         return model_list
 
@@ -52,7 +55,7 @@ class CalcTrajectory:
     def _get_T0(weight_diffs: List[List[np.ndarray]]) -> np.ndarray:
         flat_weight_diffs: np.ndarray = np.array(
             [
-                np.concatenate([w.flatten() if w.ndim > 1 else w for w in weights])
+                np.concatenate([w.flatten() if w.ndim > 1 else w for w in weights])  # type: ignore
                 for weights in weight_diffs
             ]
         )
@@ -79,7 +82,7 @@ class CalcTrajectory:
         for weight_diffs in map(self._calc_weight_differences, self._get_raw_weights()):
             yield weight_diffs
 
-    def get_T0(self)->np.ndarray:
+    def get_T0(self) -> np.ndarray:
         T0 = np.array(
             [
                 flat_weight_diffs
@@ -88,6 +91,35 @@ class CalcTrajectory:
         )
 
         return T0
+
+    def _component_allocation(self, component: np.ndarray) -> np.ndarray:
+        l: List[np.ndarray] = []
+        idx: int = 0
+        for d in self.dims:
+            l.append(component[idx : idx + d[-1]].flatten())
+            idx += d[-1]
+
+        return np.concatenate(l)  # type: ignore
+
+    @staticmethod
+    def _yield_model(t0) -> Generator[List[List[np.ndarray]], None, None]:
+        for mod in t0:
+            yield mod
+
+    @staticmethod
+    def project_2d(
+        epoch_data: np.ndarray, xd: List[np.ndarray], yd: List[np.ndarray]
+    ) -> Tuple[np.ndarray, np.ndarray]:
+        assert (
+            len(epoch_data) == len(xd) == len(yd)
+        ), f"dimensions do  not match\
+                for epoch_data: {len(epoch_data)}, xd: {len(xd)}, yd: {len(yd)}"
+        xd = np.array(xd)
+        yd = np.array(yd)
+        x = np.divide(np.dot(xd, epoch_data), np.linalg.norm(epoch_data))  # type: ignore
+        y = np.divide(np.dot(yd, epoch_data), np.linalg.norm(epoch_data))  # type: ignore
+
+        return x, y
 
     def fit(self, obj: Union[List[Union[Model, pathlib.Path, str]], Model]):
 
@@ -103,5 +135,40 @@ class CalcTrajectory:
         else:
             self._aggregate_files([obj._get_cpoint_path()])
 
-        return self.get_T0()
+        T0: np.ndarray = self.get_T0()
 
+        if not np.any(T0):
+            self.xdir: np.ndarray = np.zeros((1))  # type: ignore
+            self.ydir: np.ndarray = np.zeros((1))  # type: ignore
+            print("WARNING::No weight change btw epochs")
+            self.evr: List[np.nan] = [np.nan, np.nan]
+            return
+        xdir_list, ydir_list = [], []
+
+        pca = PCA(n_components=2)
+        if T0.ndim > 2:
+            pca.fit(np.concatenate(T0))  # type: ignore
+        else:
+            pca.fit(T0)
+        pca_1: np.ndarray = pca.components_[0]
+        pca_2: np.ndarray = pca.components_[1]
+        self.pca_dirs: List[np.ndarray] = pca.components_
+
+        T0_models = map(self._yield_model, T0)
+
+        for model_data in T0_models:
+            model_xdir, model_ydir = [], []
+            for epoch_data in model_data:
+                xdir, ydir = self.project_2d(
+                    epoch_data,
+                    self._component_allocation(pca_1),
+                    self._component_allocation(pca_2),
+                )
+                model_xdir.append(xdir)
+                model_ydir.append(ydir)
+            xdir_list.append(model_xdir)
+            ydir_list.append(model_ydir)
+
+        self.xdir = xdir_list
+        self.ydir = ydir_list
+        self.evr = pca.explained_variance_ratio_
