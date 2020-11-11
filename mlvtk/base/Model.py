@@ -1,10 +1,10 @@
 #TODO replace calls to self.checkpoint_path with self._get_cpoint_path
+#TODO allow for creation of model w/o precalling tf...Model/Sequential
 import pathlib
 import shutil
 import typing
 from typing import Union
 
-import h5py
 import tensorflow as tf
 from tensorflow.python.keras.engine.data_adapter import train_validation_split
 from tensorflow.python.keras.engine.functional import Functional
@@ -199,10 +199,12 @@ use_multiprocessing=use_multiprocessing, validation_data=self.validation_data)
     def _new_model(self):
         """ create a new model for evaluation """
 
-        config = self.get_config()
-        config["class_name"] = "Functional"
-        new_mod = tf.keras.Model.from_config(config)
-        new_mod.set_weights(self.get_weights())
+        config = self.__getattr__('get_config')()
+        if isinstance(self.model, Functional):
+            new_mod = tf.keras.Model.from_config(config)
+        else:
+            new_mod = tf.keras.Sequential.from_config(config)
+        new_mod.set_weights(self.__getattr__('get_weights')())
         new_mod.compile(optimizer=self.opt, loss=self.loss, run_eagerly=False)
 
         return new_mod

@@ -1,0 +1,24 @@
+{
+  "include": [
+    "mlvtk"
+  ],
+  
+  "exclude": [
+    "**/__pycache__",
+    "mlvtk/typestubs"
+  ],
+
+  "ignore": [
+    "mlvtk/oldstuff"
+  ],
+
+  "stubPath": "mlvtk/stubs",
+  "venvPath": "/home/fuck/default",
+
+  "reportMissingImports": true,
+  "reportMissingTypeStubs": false,
+
+  "pythonVersion": "3.8",
+  "pythonPlatform": "Linux"
+
+}

@@ -109,7 +109,7 @@ class CalcTrajectory:
     @staticmethod
     def project_2d(
         epoch_data: np.ndarray, xd: List[np.ndarray], yd: List[np.ndarray]
-    ) -> Tuple[np.ndarray, np.ndarray]:
+    ) -> Tuple[np.float32, np.float32]: # type: ignore
         assert (
             len(epoch_data) == len(xd) == len(yd)
         ), f"dimensions do  not match\
