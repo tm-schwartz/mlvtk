@@ -1,5 +1,5 @@
-#TODO replace calls to self.checkpoint_path with self._get_cpoint_path
-#TODO allow for creation of model w/o precalling tf...Model/Sequential
+# TODO replace calls to self.checkpoint_path with self._get_cpoint_path
+# TODO allow for creation of model w/o precalling tf...Model/Sequential
 import pathlib
 import shutil
 import typing
@@ -14,18 +14,24 @@ from .callbacks.CheckpointCallback import CheckpointCallback
 
 
 class Model:
-    def __init__(self, model:Union[Functional,Sequential, Model],
-            checkpoint_path:Union[pathlib.Path, str] ="vwd", verbose:int =0): #TODO add
-                                                                 # `inputs`/`outputs` to enable functional model creation
+    def __init__(
+        self,
+        model: Union[Functional, Sequential, Model],
+        checkpoint_path: Union[pathlib.Path, str] = "vwd",
+        verbose: int = 0,
+    ):  # TODO add
+        # `inputs`/`outputs` to enable functional model creation
 
         self.model = model
         self.verbose = verbose
         self.overwrite = False
-        self.checkpoint_path:typing.Union[pathlib.Path, str] = pathlib.Path(checkpoint_path)
+        self.checkpoint_path: typing.Union[pathlib.Path, str] = pathlib.Path(
+            checkpoint_path
+        )
 
     def _get_cpoint_path(self) -> pathlib.Path:
         return pathlib.Path(self.checkpoint_path)
-    
+
     def __getattr__(self, attr):
         return getattr(self.model, attr)
 
@@ -55,8 +61,7 @@ class Model:
             self.opt = "SGD"
         self.loss = kwargs.get("loss") if kwargs.get("loss") is not None else args[1]
 
-        return self.__getattr__('compile')(*args, **kwargs)
-
+        return self.__getattr__("compile")(*args, **kwargs)
 
     def fit(
         self,
@@ -188,24 +193,35 @@ class Model:
             "workers",
             "use_multiprocessing",
         ]
-        return self.__getattr__('fit')(x=x, y=y, epochs=epochs, verbose=verbose,
-callbacks=callbacks, validation_split=validation_split, shuffle=shuffle,
-class_weight=class_weight, sample_weight=sample_weight,
-initial_epoch=initial_epoch, steps_per_epoch=steps_per_epoch,
-validation_steps=validation_steps, validation_freq=validation_freq,
-max_queue_size=max_queue_size, workers=workers,
-use_multiprocessing=use_multiprocessing, validation_data=self.validation_data)
+        return self.__getattr__("fit")(
+            x=x,
+            y=y,
+            epochs=epochs,
+            verbose=verbose,
+            callbacks=callbacks,
+            validation_split=validation_split,
+            shuffle=shuffle,
+            class_weight=class_weight,
+            sample_weight=sample_weight,
+            initial_epoch=initial_epoch,
+            steps_per_epoch=steps_per_epoch,
+            validation_steps=validation_steps,
+            validation_freq=validation_freq,
+            max_queue_size=max_queue_size,
+            workers=workers,
+            use_multiprocessing=use_multiprocessing,
+            validation_data=self.validation_data,
+        )
 
     def _new_model(self):
         """ create a new model for evaluation """
 
-        config = self.__getattr__('get_config')()
+        config = self.__getattr__("get_config")()
         if isinstance(self.model, Functional):
             new_mod = tf.keras.Model.from_config(config)
         else:
             new_mod = tf.keras.Sequential.from_config(config)
-        new_mod.set_weights(self.__getattr__('get_weights')())
+        new_mod.set_weights(self.__getattr__("get_weights")())
         new_mod.compile(optimizer=self.opt, loss=self.loss, run_eagerly=False)
 
         return new_mod
-

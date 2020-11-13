@@ -109,7 +109,7 @@ class CalcTrajectory:
     @staticmethod
     def project_2d(
         epoch_data: np.ndarray, xd: List[np.ndarray], yd: List[np.ndarray]
-    ) -> Tuple[np.float32, np.float32]: # type: ignore
+    ) -> Tuple[np.float32, np.float32]:  # type: ignore
         assert (
             len(epoch_data) == len(xd) == len(yd)
         ), f"dimensions do  not match\
@@ -168,6 +168,9 @@ class CalcTrajectory:
                 model_ydir.append(ydir)
             xdir_list.append(model_xdir)
             ydir_list.append(model_ydir)
+        if np.shape(xdir_list)[0] == 1:
+            xdir_list = np.squeeze(xdir_list)
+            ydir_list = np.squeeze(ydir_list)
 
         self.xdir = xdir_list
         self.ydir = ydir_list

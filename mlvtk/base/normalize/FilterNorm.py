@@ -1,7 +1,8 @@
 import functools
 from typing import List, TypeVar, Union, Optional
-from tqdm import tqdm
+from tqdm.auto import tqdm
 import numpy as np
+import pandas as pd
 
 T = TypeVar("T")
 LLNP = Union[List[np.float32], List[List[np.float32]]]  # type: ignore
@@ -47,12 +48,14 @@ def _yield(arr):
     for a in arr:
         yield a
 
+
 def _evaluate(model, filters, weights):
-    new_weights = np.add(weights, filters) # type: ignore
+    new_weights = np.add(weights, filters)  # type: ignore
     model.set_weights(new_weights)
-    return model.evaluate(*model.validation_data,
-                use_multiprocessing=True,
-                verbose=0)
+    return model.evaluate(
+        model.validation_data, use_multiprocessing=True, verbose=0, return_dict=True
+    ).get("loss")
+
 
 def normalizer(
     model,
@@ -90,9 +93,10 @@ def normalizer(
         else:
             pca_dirs = None
 
-    if len(xdir) == len(ydir) <= 1:  # type: ignore
+    if np.size(xdir) == np.size(ydir) and np.size(xdir) <= 1:  # type: ignore
         alphas = np.linspace(-5, 5, num=alphas_size, dtype=np.float32)  # type: ignore
         betas = np.linspace(-5, 5, num=betas_size, dtype=np.float32)  # type: ignore
+        print("ANAPHYLAXIS")
 
     elif extension == "std":
         xdiff = np.std(xdir)
@@ -115,7 +119,6 @@ def normalizer(
         alphas = _linspace_dispatcher(xdir, xdiff, alphas_size)  # type: ignore
         betas = _linspace_dispatcher(ydir, ydiff, betas_size)  # type: ignore
         coordinate_list = np.column_stack([xdir, ydir])
-
 
     # For readability, make local vars
     alph = alphas[None, :, None]  # [[[`val`], [`val`],...]]
@@ -140,7 +143,7 @@ def normalizer(
     # so then result[i] == [`val_i_0`, `val_i_1`]
     # adapted from https://stackoverflow.com/a/50195230
     alphas_betas_list = np.reshape(
-        np.concatenate([alph + bet_zeros, alph_zeros + bet], axis=2), # type: ignore
+        np.concatenate([alph + bet_zeros, alph_zeros + bet], axis=2),  # type: ignore
         (alphas.shape[0] * betas.shape[0], 2),
     )
     # alphas_betas_list = np.column_stack([alphas, betas])
@@ -171,35 +174,45 @@ def normalizer(
 
     if np.ndim(coordinate_list) > 2:
         optimizer_filters = [
-                _gen_filters(gamma, delta, coord_list, weights)
-                for coord_list in coordinate_list
-            ]
+            _gen_filters(gamma, delta, coord_list, weights)
+            for coord_list in coordinate_list
+        ]
         optimizer_losses = []
 
-        for mod in tqdm(optimizer_filters):
-            for filt in tqdm(mod):
-                optimizer_losses.append(_evaluate(model, filt, weights,))
+        for mod in tqdm(optimizer_filters, desc="optimizer path"):
+            t = []
+            for filt in tqdm(mod, desc="filter"):
+                t.append(
+                    _evaluate(
+                        model,
+                        filt,
+                        weights,
+                    )
+                )
+            optimizer_losses.append(t)
 
     else:
         optimizer_filters = _gen_filters(gamma, delta, coordinate_list, weights)
-        optimizer_losses = np.zeros((np.size(xdir))) # type: ignore
+        optimizer_losses = np.zeros((np.size(xdir)))  # type: ignore
 
-        for i, filt in enumerate(tqdm(optimizer_filters)):
+        for i, filt in enumerate(tqdm(optimizer_filters, desc="filter")):
             optimizer_losses[i] = _evaluate(model, filt, weights)
 
-    
+    filter_losses = []
+    tbar = tqdm(total=normalized_filters.shape[0], desc="filter-block")
+    for num, ai in enumerate(_yield(normalized_filters)):
+        tbar.update(1)  # type: ignore
+        t = []
+        for filt in tqdm(ai, desc=f"filter {num}"):
+            t.append(_evaluate(model, filt, weights))
+        filter_losses.append(t)
+    tbar.close()  # type: ignore
 
-    filter_losses =[]
-    for ai in tqdm(_yield(normalized_filters)):
-        for filt in tqdm(ai):
-            filter_losses.append(_evaluate(model, filt, weights))
-
-    return np.reshape(filter_losses, (np.size(alphas), np.size(betas)))
-
-
-
-
-
-            
-
-
+    return {
+        "surface": pd.DataFrame(
+            data=np.reshape(filter_losses, (np.size(alphas), np.size(betas))),
+            index=alphas,
+            columns=betas,
+        ),
+        "optimizer": (xdir, ydir, optimizer_losses),
+    }
