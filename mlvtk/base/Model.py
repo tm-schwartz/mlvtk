@@ -1,9 +1,7 @@
-# TODO replace calls to self.checkpoint_path with self._get_cpoint_path
-# TODO allow for creation of model w/o precalling tf...Model/Sequential
 import pathlib
 import shutil
 import typing
-from typing import Union
+from typing import Union, Optional
 
 import tensorflow as tf
 from tensorflow.python.keras.engine.data_adapter import train_validation_split
@@ -16,13 +14,21 @@ from .callbacks.CheckpointCallback import CheckpointCallback
 class Model:
     def __init__(
         self,
-        model: Union[Functional, Sequential, Model],
+        model: Optional[Union[Functional, Sequential, Model]] = None,
         checkpoint_path: Union[pathlib.Path, str] = "vwd",
         verbose: int = 0,
-    ):  # TODO add
-        # `inputs`/`outputs` to enable functional model creation
+        inputs=None,
+        outputs=None,
+    ):
 
-        self.model = model
+        if model is None:
+            if inputs is not None and outputs is not None:
+                self.model = Model(inputs=inputs, outputs=outputs)
+            elif isinstance(model, list):
+                self.model = Sequential(model)
+        else:
+            self.model = model
+
         self.verbose = verbose
         self.overwrite = False
         self.checkpoint_path: typing.Union[pathlib.Path, str] = pathlib.Path(
@@ -111,39 +117,34 @@ class Model:
             NotImplementedError: if `validation_data` is not passed.
         """
 
-        self.checkpoint_path = pathlib.Path(self.checkpoint_path)
-
         if (
-            self.checkpoint_path.exists()
-            and self.checkpoint_path.is_dir()
-            and self.checkpoint_path.lstat().st_size
+            self._get_cpoint_path().exists()
+            and self._get_cpoint_path().is_dir()
+            and self._get_cpoint_path.lstat().st_size
         ):
 
             if self.overwrite is not None:
                 if self.overwrite:
-                    shutil.rmtree(self.checkpoint_path)
+                    shutil.rmtree(self._get_cpoint_path())
                 elif self.overwrite == False:
                     self.checkpoint_path = input("Please enter new save folder path ")
-                    self.checkpoint_path = pathlib.Path(self.checkpoint_path)
-
             else:
                 overwrite = input(
-                    f"{self.checkpoint_path} is not empty, overwrite? (this message can be silenced by setting `overwrite=True/False`)"
+                    f"{self._get_cpoint_path()} is not empty, overwrite? (this message can be silenced by setting `overwrite=True/False`)"
                 )
                 while True:
                     if overwrite in ["no", "n"]:
                         self.checkpoint_path = input(
                             "Please enter new save folder path "
                         )
-                        self.checkpoint_path = pathlib.Path(self.checkpoint_path)
                         break
                     elif overwrite in ["yes", "y"]:
-                        shutil.rmtree(self.checkpoint_path)
+                        shutil.rmtree(self._get_cpoint_path())
                         break
                     overwrite = input("please enter: yes/no/y/n")
 
-        if not self.checkpoint_path.is_dir():
-            self.checkpoint_path.mkdir(parents=True)
+        if not self._get_cpoint_path().is_dir():
+            self._get_cpoint_path().mkdir(parents=True)
 
         if validation_split and not validation_data:
             if not (
@@ -172,9 +173,9 @@ class Model:
 
         if callbacks:
             # TODO: add overwrite option
-            callbacks.append(CheckpointCallback(path=self.checkpoint_path))
+            callbacks.append(CheckpointCallback(path=self._get_cpoint_path()))
         else:
-            callbacks = [CheckpointCallback(path=self.checkpoint_path)]
+            callbacks = [CheckpointCallback(path=self._get_cpoint_path())]
 
         keys = [
             "y",
@@ -222,6 +223,6 @@ class Model:
         else:
             new_mod = tf.keras.Sequential.from_config(config)
         new_mod.set_weights(self.__getattr__("get_weights")())
-        new_mod.compile(optimizer=self.opt, loss=self.loss, run_eagerly=False)
+        new_mod.compile(optimizer=self.opt, loss=self.loss)
 
         return new_mod
