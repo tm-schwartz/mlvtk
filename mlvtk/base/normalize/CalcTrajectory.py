@@ -1,11 +1,10 @@
 import pathlib
-from typing import Generator, List, Tuple, Union
-
+from typing import Generator, List, Tuple, Union, TypeVar
 import h5py
 import numpy as np
 from sklearn.decomposition import PCA
 
-from ..Model import Model
+vmodel = TypeVar("vmodel")
 
 
 class CalcTrajectory:
@@ -72,7 +71,7 @@ class CalcTrajectory:
 
     def _yield_file_lists(self) -> Generator[List[pathlib.Path], None, None]:
         for mod in self.files:
-            yield mod  # TODO call _load_model() on mod
+            yield mod  
 
     def _get_raw_weights(self):  # for
         for modeldata in map(self._build_item_list, self._yield_file_lists()):
@@ -121,16 +120,16 @@ class CalcTrajectory:
 
         return x, y
 
-    def fit(self, obj: Union[List[Union[Model, pathlib.Path, str]], Model]):
+    def fit(self, obj: Union[List[Union[vmodel, pathlib.Path, str]], vmodel]):
 
         if isinstance(obj, List):
-            if isinstance(obj[0], Model):
-                _obj = [getattr(mod, "_get_cpoint_path")() for mod in obj]
+            if isinstance(obj[0], str):
+                _obj = [pathlib.Path(str(p)) for p in obj]
                 self._aggregate_files(_obj)
             elif isinstance(obj[0], pathlib.Path):
                 self._aggregate_files(obj)
             else:
-                _obj = [pathlib.Path(str(p)) for p in obj]
+                _obj = [mod._get_cpoint_path() for mod in obj]
                 self._aggregate_files(_obj)
         else:
             self._aggregate_files([obj._get_cpoint_path()])
@@ -157,7 +156,7 @@ class CalcTrajectory:
         T0_models = map(self._yield_model, T0)
 
         for model_data in T0_models:
-            model_xdir, model_ydir = [], []
+            model_xdir, model_ydir = [0], [0]
             for epoch_data in model_data:
                 xdir, ydir = self.project_2d(
                     epoch_data,

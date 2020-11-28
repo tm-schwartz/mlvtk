@@ -1,8 +1,9 @@
-import functools
-from typing import List, TypeVar, Union, Optional
+from typing import List, TypeVar, Union
 from tqdm.auto import tqdm
 import numpy as np
 import pandas as pd
+from tensorflow import data as tfdata
+from tensorflow import device
 
 T = TypeVar("T")
 LLNP = Union[List[np.float32], List[List[np.float32]]]  # type: ignore
@@ -12,48 +13,20 @@ def _linspace_dispatcher(j, jdiff, jsize):
     return np.linspace(j.min() - jdiff, j.max() + jdiff, num=jsize, dtype=np.float32)  # type: ignore
 
 
-def _reshape(values, weights):
-    s = 0
-    for w in weights:
-        yield np.reshape(values[s : s + w.size], w.shape)
-        s += w.size
-
-
 def _normalize_filter(fw: np.ndarray) -> np.ndarray:
-    # TODO: VERIFY NEED FOR ARRAY CAST
     f, w = fw
-    return f * np.array([(np.linalg.norm(w) / (np.linalg.norm(f) + 1e-10))])
+    return f * np.linalg.norm(w) / (np.linalg.norm(f) + 1e-10)
 
 
-def _gen_filters(arr1, arr2, arr3, weights):
-    return np.array(
-        [
-            np.array(
-                [
-                    h * a + i * b
-                    for h, i in zip(
-                        map(_normalize_filter, zip(arr1, weights)),
-                        map(_normalize_filter, zip(arr2, weights)),
-                    )
-                ],
-                dtype="object",
-            )
-            for a, b in arr3
-        ],
-        dtype="object",
-    )
+def _evaluate(model, filters, data):
+    model.set_weights(filters)
+    if not isinstance(data, tfdata.Dataset):
+        return model.evaluate(
+            x=data[0], y=data[1], use_multiprocessing=True, verbose=0, return_dict=True
+        ).get("loss")
 
-
-def _yield(arr):
-    for a in arr:
-        yield a
-
-
-def _evaluate(model, filters, weights):
-    new_weights = np.add(weights, filters)  # type: ignore
-    model.set_weights(new_weights)
     return model.evaluate(
-        model.validation_data, use_multiprocessing=True, verbose=0, return_dict=True
+        data, use_multiprocessing=True, verbose=0, return_dict=True
     ).get("loss")
 
 
@@ -63,6 +36,7 @@ def normalizer(
     alphas_size: int = 35,
     betas_size: int = 35,
     extension: T = 1,
+    quiet=False,
     **kwargs,
 ):
 
@@ -75,6 +49,8 @@ def normalizer(
             "xdir",
             "ydir",
             "pca_dirs",
+            "alphas_size",
+            "betas_size"
         ], f"{key} is not a\
         valid kwarg"
 
@@ -96,7 +72,6 @@ def normalizer(
     if np.size(xdir) == np.size(ydir) and np.size(xdir) <= 1:  # type: ignore
         alphas = np.linspace(-5, 5, num=alphas_size, dtype=np.float32)  # type: ignore
         betas = np.linspace(-5, 5, num=betas_size, dtype=np.float32)  # type: ignore
-        print("ANAPHYLAXIS")
 
     elif extension == "std":
         xdiff = np.std(xdir)
@@ -153,11 +128,15 @@ def normalizer(
         # delta <- eta
         gamma = np.array([np.reshape(np.random.randn(ww.size), ww.shape) for ww in weights], dtype="object")  # type: ignore
         delta = np.array([np.reshape(np.random.randn(ww.size), ww.shape) for ww in weights], dtype="object")  # type: ignore
-
     else:
         pca_gamma, pca_delta = pca_dirs
-        gamma = np.array([pg for pg in _reshape(pca_gamma, weights)])
-        delta = np.array([pd for pd in _reshape(pca_delta, weights)])
+        gamma = []
+        delta = []
+        i = 0
+        for l in weights:
+            gamma.append(_normalize_filter((pca_gamma[i : i + l.size], l)))
+            delta.append(_normalize_filter((pca_delta[i : i + l.size], l)))
+            i += l.size
 
     batch_norm_filter = filter(
         lambda layer: "batch_normalization" in layer.name, model.layers
@@ -168,45 +147,56 @@ def normalizer(
             gamma[i] = np.zeros((gamma[i].shape))  # type: ignore
             delta[i] = np.zeros((delta[i].shape))  # type: ignore
 
-    normalized_filters = _gen_filters(gamma, delta, alphas_betas_list, weights).reshape(
-        alphas.shape[0], betas.shape[0], len(weights)
-    )
+    w_concat = np.concatenate([w.flatten() for w in weights])
+    g_concat = np.concatenate(gamma)
+    d_concat = np.concatenate(delta)
+
+    def _reshape(values):
+        s = 0
+        nw = []
+        for w in weights:
+            nw.append(np.reshape(values[s : s + w.size], w.shape))
+            s += w.size
+        return nw
+
+    def _yield(arr):
+        for (a, b) in arr:
+            yield _reshape(w_concat + (g_concat * a + d_concat * b))
+
+    normalized_filters = _yield(alphas_betas_list)
+
+    non_eager_model = model._new_model()
 
     if np.ndim(coordinate_list) > 2:
-        optimizer_filters = [
-            _gen_filters(gamma, delta, coord_list, weights)
-            for coord_list in coordinate_list
-        ]
+        optimizer_filters = [_yield(coord_list) for coord_list in coordinate_list]
         optimizer_losses = []
 
-        for mod in tqdm(optimizer_filters, desc="optimizer path"):
+        for mod in tqdm(optimizer_filters, desc="optimizer path", disable=quiet):
             t = []
-            for filt in tqdm(mod, desc="filter"):
+            for filt in tqdm(mod, desc="filter", disable=quiet):
                 t.append(
-                    _evaluate(
-                        model,
-                        filt,
-                        weights,
-                    )
+                    _evaluate(non_eager_model, filt, weights, model.validation_data)
                 )
             optimizer_losses.append(t)
 
     else:
-        optimizer_filters = _gen_filters(gamma, delta, coordinate_list, weights)
+        optimizer_filters = _yield(coordinate_list)
         optimizer_losses = np.zeros((np.size(xdir)))  # type: ignore
 
-        for i, filt in enumerate(tqdm(optimizer_filters, desc="filter")):
-            optimizer_losses[i] = _evaluate(model, filt, weights)
+        for i, filt in enumerate(
+            tqdm(optimizer_filters, desc="filter", disable=quiet, total=np.size(xdir))
+        ):
+            optimizer_losses[i] = _evaluate(
+                non_eager_model, filt, model.validation_data
+            )
 
-    filter_losses = []
-    tbar = tqdm(total=normalized_filters.shape[0], desc="filter-block")
-    for num, ai in enumerate(_yield(normalized_filters)):
-        tbar.update(1)  # type: ignore
-        t = []
-        for filt in tqdm(ai, desc=f"filter {num}"):
-            t.append(_evaluate(model, filt, weights))
-        filter_losses.append(t)
-    tbar.close()  # type: ignore
+    total = alphas_size * betas_size
+    filter_losses = np.zeros((total))
+
+    for i, filt in enumerate(
+        tqdm(normalized_filters, desc=f"filter", disable=quiet, total=total)
+    ):
+        filter_losses[i] = _evaluate(non_eager_model, filt, model.validation_data)
 
     return {
         "surface": pd.DataFrame(

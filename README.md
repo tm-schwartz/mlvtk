@@ -68,27 +68,48 @@ jupyter labextension install jupyterlab-plotly@4.10.0
 jupyter labextension install @jupyter-widgets/jupyterlab-manager plotlywidget@4.10.0
 ```
 
-### Usage
+### Basic Example
 
 ```python
-# construct standard 3 layer network
-inputs = tf.keras.layers.Input(shape=(None,784))
+from mlvtk.base import Vmodel
+import tensorflow as tf
+import numpy as np
+
+# NN with 1 hidden layer
+inputs = tf.keras.layers.Input(shape=(None,100))
 dense_1 = tf.keras.layers.Dense(50, activation='relu')(inputs)
-outputs = tf.keras.layers.Dense(np.unique(label_train, axis=0).size, activation='softmax')(dense_1) # hard coded outputs size
+outputs = tf.keras.layers.Dense(10, activation='softmax')(dense_1)
 _model = tf.keras.Model(inputs, outputs)
 
-# create mlvtk model
-model = create_model(_model)
-
-# compile and fit like a standard tensorflow model
+# Wrap with Vmodel
+model = Vmodel(_model)
 model.compile(optimizer=tf.keras.optimizers.SGD(),
-loss=tf.keras.losses.CategoricCategoricalCrossentropy(), metrics=['accuracy'])
+loss=tf.keras.losses.CategoricalCrossentropy(), metrics=['accuracy'])
 
-history = model.fit(train_data, validation_data=val_data, epochs=epochs, verbose=0)
+# All tf.keras.(Model/Sequential/Functional) methods/properties are accessible
+# from Vmodel
 
-# add title to surface plot
-model.surface_plot(title_text=f'Data: {dataname}, Epochs: {epochs}, Optimizer: {model.opt}, LR: {lr}')
+model.summary()
+model.get_config()
+model.get_weights()
+model.layers
 
-model.interp_plot(title=f'Data: {dataname}, Epochs: {epochs}, Optimizer: {model.opt}, LR: {lr}')
+# Create random example data
+x = np.random.rand(3, 10, 100)
+y = np.random.randint(9, size=(3, 10, 10))
+xval = np.random.rand(1, 10, 100)
+yval = np.random.randint(9, size=(1,10,10))
 
+# Only difference, model.fit requires validation_data (tf.data.Dataset, or
+# other container
+history = model.fit(x, y, validation_data=(xval, yval), epochs=10, verbose=0)
+
+# Calling model.surface_plot() returns a plotly.graph_objs.Figure
+fig = model.surface_plot()
+
+# This can be saved to an interactive html file,
+fig.write_html("surface_plot.html")
+
+# or viewed in jupyter notebook/lab or other compatible tool.
+fig.show()
 ```
