@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
         name="mlvtk",
-        version="0.0.22.a7",
+        version="1.0.0",
         author="tm-schwartz",
         author_email="tschwartz@csumb.edu",
         description="loss surface visualization tool",
@@ -23,5 +23,5 @@ setuptools.setup(
             "Operating System :: OS Independent",
             ],
         python_requires='>=3.6',
-        install_requires=['tensorflow', 'pandas', 'plotly', 'sklearn', 'matplotlib']
+        install_requires=['tensorflow', 'pandas', 'plotly', 'sklearn', 'matplotlib', 'tqdm']
         )
