@@ -44,7 +44,8 @@ class CalcTrajectory:
     def _calc_weight_differences(
         modeldata: List[List[np.ndarray]],
     ) -> List[List[np.ndarray]]:
-        theta_final: List[np.ndarray] = modeldata.pop()
+        theta_final: List[np.ndarray] = modeldata[-1]
+        modeldata = modeldata[:-1]
         differences: List[List[np.ndarray]] = [
             [tf_w - tw for tf_w, tw in zip(theta_final, theta)] for theta in modeldata
         ]
@@ -82,14 +83,14 @@ class CalcTrajectory:
             yield weight_diffs
 
     def get_T0(self) -> np.ndarray:
-        T0 = np.array(
-            [
-                flat_weight_diffs
-                for flat_weight_diffs in map(self._get_T0, self._get_weight_diffs())
-            ]
-        )
-
-        return T0
+      #  T0 = np.array(
+      #      [
+      #          flat_weight_diffs
+      #          for flat_weight_diffs in map(self._get_T0, self._get_weight_diffs())
+      #      ]
+      #  )
+      T0 = np.hstack([*map(self._get_T0, self._get_weight_diffs())])
+      return T0
 
     def _component_allocation(self, component: np.ndarray) -> np.ndarray:
         l: List[np.ndarray] = []
@@ -115,8 +116,8 @@ class CalcTrajectory:
                 for epoch_data: {len(epoch_data)}, xd: {len(xd)}, yd: {len(yd)}"
         xd = np.array(xd)
         yd = np.array(yd)
-        x = np.divide(np.dot(xd, epoch_data), np.linalg.norm(epoch_data))  # type: ignore
-        y = np.divide(np.dot(yd, epoch_data), np.linalg.norm(epoch_data))  # type: ignore
+        x = np.divide(np.dot(epoch_data, xd), np.linalg.norm(xd))  # type: ignore
+        y = np.divide(np.dot(epoch_data, yd), np.linalg.norm(yd))  # type: ignore
 
         return x, y
 
@@ -144,19 +145,21 @@ class CalcTrajectory:
             return
         xdir_list, ydir_list = [], []
 
+
         pca = PCA(n_components=2)
         if T0.ndim > 2:
             pca.fit(np.concatenate(T0))  # type: ignore
+            T0_models = map(self._yield_model, T0)
         else:
             pca.fit(T0)
+            T0_models = map(self._yield_model, np.expand_dims(T0, 0))
         pca_1: np.ndarray = pca.components_[0]
         pca_2: np.ndarray = pca.components_[1]
         self.pca_dirs: List[np.ndarray] = pca.components_
 
-        T0_models = map(self._yield_model, T0)
 
         for model_data in T0_models:
-            model_xdir, model_ydir = [0], [0]
+            model_xdir, model_ydir = [], []
             for epoch_data in model_data:
                 xdir, ydir = self.project_2d(
                     epoch_data,
@@ -165,6 +168,8 @@ class CalcTrajectory:
                 )
                 model_xdir.append(xdir)
                 model_ydir.append(ydir)
+            model_xdir.append(0)
+            model_ydir.append(0)
             xdir_list.append(model_xdir)
             ydir_list.append(model_ydir)
         if np.shape(xdir_list)[0] == 1:
