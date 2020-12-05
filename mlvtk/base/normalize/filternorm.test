@@ -1,9 +1,16 @@
+import tensorflow as tf
 from typing import List, TypeVar, Union
 from tqdm.auto import tqdm
 import numpy as np
 import pandas as pd
-from tensorflow import data as tfdata
-from tensorflow import device
+from memory_profiler import profile
+import dask.array as da
+import dask.multiprocessing
+dask.config.set(scheduler='processes')
+import numcodecs
+import zarr
+import pathlib
+
 
 T = TypeVar("T")
 LLNP = Union[List[np.float32], List[List[np.float32]]]  # type: ignore
@@ -13,14 +20,28 @@ def _linspace_dispatcher(j, jdiff, jsize):
     return np.linspace(j.min() - jdiff, j.max() + jdiff, num=jsize, dtype=np.float32)  # type: ignore
 
 
+def old_reshape(values, weights):
+    s = 0
+    for w in weights:
+        yield np.reshape(values[s : s + w.size], w.shape)
+        s += w.size
+
+def _reshape(values, weights):
+    s = 0
+    nw = []
+    for w in weights:
+        nw.append(np.reshape(values[s : s + w.size], w.shape))
+        s += w.size
+    return nw
 def _normalize_filter(fw: np.ndarray) -> np.ndarray:
     f, w = fw
-    return f * np.linalg.norm(w) / (np.linalg.norm(f) + 1e-10)
+    return f * np.linalg.norm(w.flatten()) / (np.linalg.norm(f.flatten()) + 1e-10)
 
 
-def _evaluate(model, filters, data):
-    model.set_weights(filters)
-    if not isinstance(data, tfdata.Dataset):
+def _evaluate(model, weights, data, filters):
+    new_weights = _reshape(filters, weights) #np.add(weights, filters)
+    model.set_weights(new_weights)
+    if not isinstance(data, tf.data.Dataset):
         return model.evaluate(
             x=data[0], y=data[1], use_multiprocessing=True, verbose=0, return_dict=True
         ).get("loss")
@@ -28,7 +49,6 @@ def _evaluate(model, filters, data):
     return model.evaluate(
         data, use_multiprocessing=True, verbose=0, return_dict=True
     ).get("loss")
-
 
 def normalizer(
     model,
@@ -40,7 +60,17 @@ def normalizer(
     **kwargs,
 ):
 
-    weights: List[np.ndarray] = model.get_weights()
+    def mini_reshape(values, interval):
+        return da.reshape(values[interval[0]:interval[1]], weights[interval[2]].shape).compute()
+
+    weights = model.get_weights()
+
+    waits = [w.size for w in weights]
+
+    waits = np.cumsum(waits)
+
+    intervals = [(0, waits[0], 0), *[(waits[i], e, i+1) for i, e in enumerate(waits[1:])]]
+
 
     for key in kwargs:
         assert key in [
@@ -49,8 +79,6 @@ def normalizer(
             "xdir",
             "ydir",
             "pca_dirs",
-            "alphas_size",
-            "betas_size"
         ], f"{key} is not a\
         valid kwarg"
 
@@ -60,18 +88,18 @@ def normalizer(
 
     if traj_calc:
         xdir, ydir = traj_calc.xdir, traj_calc.ydir
-        pca_dirs = traj_calc.pca_dirs
+        pca_dirs = [da.from_array(arr) for arr in traj_calc.pca_dirs]
 
     else:
         xdir, ydir = kwargs["xdir"], kwargs["ydir"]
         if "pca_dirs" in kwargs:
-            pca_dirs = kwargs["pca_dirs"]
+            pca_dirs =  kwargs["pca_dirs"]
         else:
             pca_dirs = None
 
     if np.size(xdir) == np.size(ydir) and np.size(xdir) <= 1:  # type: ignore
-        alphas = np.linspace(-5, 5, num=alphas_size, dtype=np.float32)  # type: ignore
-        betas = np.linspace(-5, 5, num=betas_size, dtype=np.float32)  # type: ignore
+        alphas = np.linspace(-5, 5, num=alphas_size)  # type: ignore
+        betas = np.linspace(-5, 5, num=betas_size)  # type: ignore
 
     elif extension == "std":
         xdiff = np.std(xdir)
@@ -126,8 +154,9 @@ def normalizer(
     if pca_dirs is None:
         # gamma <- delta
         # delta <- eta
-        gamma = np.array([np.reshape(np.random.randn(ww.size), ww.shape) for ww in weights], dtype="object")  # type: ignore
-        delta = np.array([np.reshape(np.random.randn(ww.size), ww.shape) for ww in weights], dtype="object")  # type: ignore
+        gamma = da.array([_normalize_filter((da.random.normal(size=ww.size), ww)) for ww in weights])  # type: ignore
+        delta = da.array([_normalize_filter((da.random.normal(size=ww.size), ww)) for ww in weights])  # type: ignore
+
     else:
         pca_gamma, pca_delta = pca_dirs
         gamma = []
@@ -144,60 +173,61 @@ def normalizer(
     if batch_norm_filter:
         for layer in batch_norm_filter:
             i = model.layers.index(layer)
-            gamma[i] = np.zeros((gamma[i].shape))  # type: ignore
-            delta[i] = np.zeros((delta[i].shape))  # type: ignore
+            gamma[i] = da.zeros((gamma[i].shape))  # type: ignore
+            delta[i] = da.zeros((delta[i].shape))  # type: ignore
 
-    w_concat = np.concatenate([w.flatten() for w in weights])
-    g_concat = np.concatenate(gamma)
-    d_concat = np.concatenate(delta)
+    w_concat = da.concatenate([w.flatten() for w in weights])
+    g_concat = da.concatenate(gamma)
+    d_concat = da.concatenate(delta)
+    if not pathlib.Path('filters'):
+        pathlib.Path('filters/nfilters').mkdir(parents=True)
+       # pathlib.Path('filters/ofilters').mkdir(parents=True)
 
-    def _reshape(values):
-        s = 0
-        nw = []
-        for w in weights:
-            nw.append(np.reshape(values[s : s + w.size], w.shape))
-            s += w.size
-        return nw
-
-    def _yield(arr):
-        for (a, b) in arr:
-            yield _reshape(w_concat + g_concat * a + d_concat * b)
-
-    normalized_filters = _yield(alphas_betas_list)
+    print("rechunk")
+    normalized_filters = da.stack(
+        [w_concat + (g_concat * a + d_concat * b) for (a, b) in alphas_betas_list]
+    ).rechunk(balance=True).to_zarr('filters/nfilters.zarr', overwrite=True)
 
     non_eager_model = model._new_model()
 
     if np.ndim(coordinate_list) > 2:
-        optimizer_filters = [_yield(coord_list) for coord_list in coordinate_list]
+
+        optimizer_filters = [
+            da.stack(
+                [w_concat + (g_concat * a + d_concat * b) for (a, b) in coord_list]
+            )
+            for coord_list in coordinate_list
+        ]
+
         optimizer_losses = []
 
-        for mod in tqdm(optimizer_filters, desc="optimizer path", disable=quiet, leave=False):
+        for mod in tqdm(optimizer_filters, desc="optimizer path", disable=quiet):
             t = []
-            for filt in tqdm(mod, desc="filter", disable=quiet, leave=False):
-                t.append(
-                    _evaluate(non_eager_model, filt, weights, model.validation_data)
-                )
+            for filt in tqdm(mod, desc="filter", disable=quiet):
+                t.append(_evaluate(filt))
             optimizer_losses.append(t)
 
     else:
-        optimizer_filters = _yield(coordinate_list)
-        optimizer_losses = np.zeros((np.size(xdir)))  # type: ignore
+        optimizer_filters = da.stack(
+            [w_concat + (g_concat * a + d_concat * b) for (a, b) in coordinate_list]
+        )
+        #optimizer_losses = np.zeros((np.size(xdir)))  # type: ignore
+        optimizer_losses = []
 
-        for i, filt in enumerate(
-            tqdm(optimizer_filters, desc="filter", disable=quiet, total=np.size(xdir), leave=False)
-        ):
-            optimizer_losses[i] = _evaluate(
-                non_eager_model, filt, model.validation_data
-            )
+        print("opt")
+        for i, filt in enumerate(tqdm(optimizer_filters, desc="filter", disable=quiet)):
+            optimizer_losses.append(_evaluate(non_eager_model, weights, model.validation_data, filt.compute()))
 
-    total = alphas_size * betas_size
-    filter_losses = np.zeros((total))
+    del optimizer_filters
 
-    for i, filt in enumerate(
-        tqdm(normalized_filters, desc=f"filter", disable=quiet, total=total, leave=False)
-    ):
-        filter_losses[i] = _evaluate(non_eager_model, filt, model.validation_data)
-
+    #filter_losses = np.zeros((alphas_size * betas_size))
+    filter_losses = []
+    z = zarr.open('filters/nfilters.zarr', mode='r')
+    for i, filt in enumerate(tqdm(z, desc="norm_filters", disable=quiet)):
+        filter_losses.append(_evaluate(non_eager_model, weights, model.validation_data,z))
+    
+    
+    del normalized_filters
     return {
         "surface": pd.DataFrame(
             data=np.reshape(filter_losses, (np.size(alphas), np.size(betas))),

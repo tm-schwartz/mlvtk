@@ -13,7 +13,7 @@ setuptools.setup(
         long_description_content_type="text/markdown",
         url="https://github.com/tm-schwartz/mlvtk",
         license='MIT',
-        packages=setuptools.find_packages(),
+        packages=setuptools.find_packages(exclude=["legacy", "misc", "visuals"]),
         classifiers=[ 
             "Development Status :: 3 - Alpha",
             "Programming Language :: Python :: 3.6",
