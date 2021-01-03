@@ -8,6 +8,22 @@ vmodel = TypeVar("vmodel")
 
 
 class CalcTrajectory:
+    def make_ext_link_file(self, path, fp):
+        h5 = h5py.File(fp, 'r')
+
+        l = []
+        def _get_paths(name, obj):
+            if isinstance(obj,h5py.Dataset):
+                l.append(obj.name)
+
+        h5.visititems(_get_paths)
+        h5.close()
+        h5_ext = h5py.File(path.joinpath('h5_ext_links.hdf5'), 'w')
+        for i, p in enumerate(path.iterdir()):
+            for ii, link in enumerate(l):
+                h5_ext[f"{i}.{ii}"] = h5py.ExternalLink(p, link)
+        h5_ext.close()
+
     def _build_item_list(
         self,
         directory: List[pathlib.Path],
@@ -137,10 +153,10 @@ class CalcTrajectory:
 
         T0: np.ndarray = self.get_T0()
 
-        if not np.any(T0):
+        if not np.any(T0) or np.any(np.isnan(T0)):
             self.xdir: np.ndarray = np.zeros((1))  # type: ignore
             self.ydir: np.ndarray = np.zeros((1))  # type: ignore
-            print("WARNING::No weight change btw epochs")
+            print("WARNING::No weight change btw epochs or nan")
             self.evr: List[np.nan] = [np.nan, np.nan]
             return
         xdir_list, ydir_list = [], []
