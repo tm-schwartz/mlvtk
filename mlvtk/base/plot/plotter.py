@@ -44,21 +44,19 @@ def make_trace(
                     showlegend=showlegend,
                     name=f"{scatter_name}_{i}",
                 )
-                for i, (x, y, z, color) in enumerate(
-                    zip(*data, colors)
-                )
+                for i, (x, y, z, color) in enumerate(zip(*data, colors))
             )
 
     else:
-            scatter_trace = go.Scatter3d(
-                x=data[0],
-                y=data[1],
-                z=data[2],
-                marker=marker,
-                line=line,
-                showlegend=showlegend,
-                name=scatter_name,
-            )
+        scatter_trace = go.Scatter3d(
+            x=data[0],
+            y=data[1],
+            z=data[2],
+            marker=marker,
+            line=line,
+            showlegend=showlegend,
+            name=scatter_name,
+        )
     return scatter_trace
 
 
@@ -89,6 +87,7 @@ def make_figure(traces):
             )
 
     fig = go.Figure(data=traces)
+    # TODO verify update actually updates **here**
     fig.update_layout(
         autosize=False,
         width=1200,
@@ -99,6 +98,6 @@ def make_figure(traces):
             colorscale="haline_r",
             colorbar=dict(title="Loss Surface Value", len=0.45),
         ),
-            legend={"itemsizing": "constant"},
+        legend={"itemsizing": "constant"},
     )
     return fig
