@@ -1,0 +1,11 @@
+* 1.0.2
+** [2021-02-09 Tue 20:38] CalcTrajectory: Added comments describing make_ext_link_file for future implementation.
+
+
+** [2021-02-09 Tue 20:35] CalcTrajectory: Fixed Vmodel.model.opt missing for Sequential models compiled before Vmodel creation. Added try-except to test for self.opt or assign self.opt if not exist.
+
+
+** [2021-02-11 Thu 17:23] CalcTrajectory: Added __slots__
+
+
+** [2021-02-24 Wed 17:02] Added new TrajectoryCalculator with improved memory usage. Trajectory now calculated using \Theta_0 - \Theta_n, to get path in relation to starting point. Loss landscape now generated using epoch 0 data. This allows for much improved comparison of multiple model paths. Fixed some minor bugs in FilterNorm (calling _evaluate with 4 args instead of 3). Fixed minor bugs in plotter (data[0] -> data).

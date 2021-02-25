@@ -11,7 +11,7 @@ from tensorflow.keras import Sequential, Model
 
 from .callbacks.CheckpointCallback import CheckpointCallback
 from .normalize.FilterNorm import normalizer
-from .normalize.CalcTrajectory import CalcTrajectory
+from .normalize.TrajectoryCalculator import TrajectoryCalculator
 from .plot import plotter
 
 
@@ -29,7 +29,7 @@ class Vmodel:
             if inputs is not None and outputs is not None:
                 self.model = tf.keras.Model(inputs=inputs, outputs=outputs)
         elif isinstance(model, list):
-                self.model = tf.keras.Sequential(model)
+            self.model = tf.keras.Sequential(model)
         else:
             self.model = model
 
@@ -57,8 +57,12 @@ class Vmodel:
             model.compile(*args, **kwargs)
         """
 
-        if kwargs.get("optimizer") is not None:
-            self.opt = kwargs.get("optimizer").__module__.split(".")[-1]
+        kwopt = kwargs.get("optimizer")
+        if kwopt is not None:
+            if isinstance(kwopt, str):
+                self.opt = kwopt
+            else:
+                self.opt = kwargs.get("optimizer").__module__.split(".")[-1]
 
         elif len(args):
             self.opt = args[0]
@@ -202,6 +206,7 @@ class Vmodel:
             x=x,
             y=y,
             epochs=epochs,
+            batch_size=batch_size,
             verbose=verbose,
             callbacks=callbacks,
             validation_split=validation_split,
@@ -212,6 +217,7 @@ class Vmodel:
             steps_per_epoch=steps_per_epoch,
             validation_steps=validation_steps,
             validation_freq=validation_freq,
+            validation_batch_size=validation_batch_size,
             max_queue_size=max_queue_size,
             workers=workers,
             use_multiprocessing=use_multiprocessing,
@@ -222,25 +228,44 @@ class Vmodel:
         """ create a new model for evaluation """
 
         config = self.__getattr__("get_config")()
-        if type(self.model) == tf.python.keras.engine.functional.Functional: # need to test type instead of isinstance bc Sequential is Functional
+        if (
+            type(self.model) == tf.python.keras.engine.functional.Functional
+        ):  # need to test type instead of isinstance bc Sequential is Functional
             new_mod = tf.keras.Model.from_config(config)
         else:
             new_mod = tf.keras.Sequential.from_config(config)
+            try:
+                self.opt != None
+            except AttributeError:
+                self.opt = self.model.optimizer.__module__.split(".")[-1]
         new_mod.set_weights(self.__getattr__("get_weights")())
-        new_mod.compile(optimizer=self.opt, loss=self.loss,
-                run_eagerly=run_eagerly)
+        # test if self.opt exists
+
+        new_mod.compile(
+            optimizer=tf.keras.optimizers.get(self.opt),
+            loss=tf.keras.losses.get(self.loss),
+            run_eagerly=run_eagerly,
+        )
 
         return new_mod
 
-    def surface_plot(self, objs=None, normalizer_config={'alphas_size':35,
-        'betas_size':35, 'extension':1, 'quiet':False}):
+    def surface_plot(
+        self,
+        objs=None,
+        normalizer_config={
+            "alphas_size": 35,
+            "betas_size": 35,
+            "extension": 1,
+            "quiet": False,
+        },
+    ):
         if objs:
             objs = [self, *objs]
         else:
             objs = self
 
-        ct = CalcTrajectory()
-        ct.fit(objs)
-        surface = normalizer(objs, ct, **normalizer_config)
+        tc = TrajectoryCalculator()
+        tc.fit(objs)
+        surface = normalizer(self, tc, **normalizer_config)
         fig = plotter.make_figure([plotter.make_trace(dat) for dat in surface.values()])
-        return fig 
+        return fig

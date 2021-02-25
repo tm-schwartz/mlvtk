@@ -1,5 +1,6 @@
 import pathlib
-from typing import Generator, List, Tuple, Union, TypeVar
+from typing import Generator, List, Tuple, TypeVar, Union
+
 import h5py
 import numpy as np
 from sklearn.decomposition import PCA
@@ -8,6 +9,34 @@ vmodel = TypeVar("vmodel")
 
 
 class CalcTrajectory:
+    __slots__ = ("dims", "files", "xdir", "ydir", "evr", "pca_dirs")
+
+    def make_ext_link_file(self, path, fp):
+        # path is path to h5_files
+        # fp is file path for h5_file
+        h5 = h5py.File(fp, "r")  # open h5 file for ext links
+
+        # list to hold dataset paths
+        l = []
+
+        # def to get paths
+        def _get_paths(name, obj):
+            if isinstance(obj, h5py.Dataset):
+                l.append(obj.name)
+
+        # get paths
+        h5.visititems(_get_paths)
+        h5.close()
+        # new h5 to store ext links
+        h5_ext = h5py.File(path.joinpath("h5_ext_links.hdf5"), "w")
+        # for h5 file in path
+        for i, p in enumerate(path.iterdir()):
+            # for dataset path in l (All h5 have same layout, so just need layout from one) create externallink.
+            # format the link name as i -> epoch . ii ->  dataset name.
+            for ii, link in enumerate(l):
+                h5_ext[f"{i}.{ii}"] = h5py.ExternalLink(p, link)
+        h5_ext.close()
+
     def _build_item_list(
         self,
         directory: List[pathlib.Path],
@@ -72,7 +101,7 @@ class CalcTrajectory:
 
     def _yield_file_lists(self) -> Generator[List[pathlib.Path], None, None]:
         for mod in self.files:
-            yield mod  
+            yield mod
 
     def _get_raw_weights(self):  # for
         for modeldata in map(self._build_item_list, self._yield_file_lists()):
@@ -83,14 +112,14 @@ class CalcTrajectory:
             yield weight_diffs
 
     def get_T0(self) -> np.ndarray:
-      #  T0 = np.array(
-      #      [
-      #          flat_weight_diffs
-      #          for flat_weight_diffs in map(self._get_T0, self._get_weight_diffs())
-      #      ]
-      #  )
-      T0 = np.hstack([*map(self._get_T0, self._get_weight_diffs())])
-      return T0
+        #  T0 = np.array(
+        #      [
+        #          flat_weight_diffs
+        #          for flat_weight_diffs in map(self._get_T0, self._get_weight_diffs())
+        #      ]
+        #  )
+        T0 = np.hstack([*map(self._get_T0, self._get_weight_diffs())])
+        return T0
 
     def _component_allocation(self, component: np.ndarray) -> np.ndarray:
         l: List[np.ndarray] = []
@@ -137,14 +166,13 @@ class CalcTrajectory:
 
         T0: np.ndarray = self.get_T0()
 
-        if not np.any(T0):
+        if not np.any(T0) or np.any(np.isnan(T0)):
             self.xdir: np.ndarray = np.zeros((1))  # type: ignore
             self.ydir: np.ndarray = np.zeros((1))  # type: ignore
-            print("WARNING::No weight change btw epochs")
+            print("WARNING::No weight change btw epochs or nan")
             self.evr: List[np.nan] = [np.nan, np.nan]
             return
         xdir_list, ydir_list = [], []
-
 
         pca = PCA(n_components=2)
         if T0.ndim > 2:
@@ -156,7 +184,6 @@ class CalcTrajectory:
         pca_1: np.ndarray = pca.components_[0]
         pca_2: np.ndarray = pca.components_[1]
         self.pca_dirs: List[np.ndarray] = pca.components_
-
 
         for model_data in T0_models:
             model_xdir, model_ydir = [], []
