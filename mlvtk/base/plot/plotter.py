@@ -26,14 +26,13 @@ def make_trace(
             name=surf_name,
         )
         return surface_trace
-    elif isinstance(data[0], tuple):
+    elif isinstance(data, tuple):
         if len(data[0]) > 1:
             colors = [
                 f"rgb{(np.random.randint(256), np.random.randint(256), np.random.randint(256))}"
                 for _ in range(len(data[0]))
             ]
 
-            breakpoint()
             scatter_trace = tuple(
                 go.Scatter3d(
                     x=x,

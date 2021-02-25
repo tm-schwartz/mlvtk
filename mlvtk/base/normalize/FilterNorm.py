@@ -50,7 +50,7 @@ def normalizer(
             "ydir",
             "pca_dirs",
             "alphas_size",
-            "betas_size"
+            "betas_size",
         ], f"{key} is not a\
         valid kwarg"
 
@@ -161,7 +161,7 @@ def normalizer(
 
     def _yield(arr):
         for (a, b) in arr:
-            yield _reshape(w_concat + g_concat * a + d_concat * b)
+            yield _reshape(w_concat + ((g_concat * a) + (d_concat * b)))
 
     normalized_filters = _yield(alphas_betas_list)
 
@@ -171,11 +171,15 @@ def normalizer(
         optimizer_filters = [_yield(coord_list) for coord_list in coordinate_list]
         optimizer_losses = []
 
-        for mod in tqdm(optimizer_filters, desc="optimizer path", disable=quiet, leave=False):
+        for mod in tqdm(
+            optimizer_filters, desc="optimizer path", disable=quiet, leave=False
+        ):
             t = []
             for filt in tqdm(mod, desc="filter", disable=quiet, leave=False):
                 t.append(
-                    _evaluate(non_eager_model, filt, weights, model.validation_data)
+                    _evaluate(
+                        model=non_eager_model, filters=filt, data=model.validation_data
+                    )
                 )
             optimizer_losses.append(t)
 
@@ -184,7 +188,13 @@ def normalizer(
         optimizer_losses = np.zeros((np.size(xdir)))  # type: ignore
 
         for i, filt in enumerate(
-            tqdm(optimizer_filters, desc="filter", disable=quiet, total=np.size(xdir), leave=False)
+            tqdm(
+                optimizer_filters,
+                desc="filter",
+                disable=quiet,
+                total=np.size(xdir),
+                leave=False,
+            )
         ):
             optimizer_losses[i] = _evaluate(
                 non_eager_model, filt, model.validation_data
@@ -194,7 +204,9 @@ def normalizer(
     filter_losses = np.zeros((total))
 
     for i, filt in enumerate(
-        tqdm(normalized_filters, desc=f"filter", disable=quiet, total=total, leave=False)
+        tqdm(
+            normalized_filters, desc=f"filter", disable=quiet, total=total, leave=False
+        )
     ):
         filter_losses[i] = _evaluate(non_eager_model, filt, model.validation_data)
 

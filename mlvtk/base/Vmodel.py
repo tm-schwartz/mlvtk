@@ -11,7 +11,7 @@ from tensorflow.keras import Sequential, Model
 
 from .callbacks.CheckpointCallback import CheckpointCallback
 from .normalize.FilterNorm import normalizer
-from .normalize.CalcTrajectory import CalcTrajectory
+from .normalize.TrajectoryCalculator import TrajectoryCalculator
 from .plot import plotter
 
 
@@ -57,8 +57,12 @@ class Vmodel:
             model.compile(*args, **kwargs)
         """
 
-        if kwargs.get("optimizer") is not None:
-            self.opt = kwargs.get("optimizer").__module__.split(".")[-1]
+        kwopt = kwargs.get("optimizer")
+        if kwopt is not None:
+            if isinstance(kwopt, str):
+                self.opt = kwopt
+            else:
+                self.opt = kwargs.get("optimizer").__module__.split(".")[-1]
 
         elif len(args):
             self.opt = args[0]
@@ -237,7 +241,11 @@ class Vmodel:
         new_mod.set_weights(self.__getattr__("get_weights")())
         # test if self.opt exists
 
-        new_mod.compile(optimizer=self.opt, loss=self.loss, run_eagerly=run_eagerly)
+        new_mod.compile(
+            optimizer=tf.keras.optimizers.get(self.opt),
+            loss=tf.keras.losses.get(self.loss),
+            run_eagerly=run_eagerly,
+        )
 
         return new_mod
 
@@ -256,8 +264,8 @@ class Vmodel:
         else:
             objs = self
 
-        ct = CalcTrajectory()
-        ct.fit(objs)
-        surface = normalizer(objs, ct, **normalizer_config)
+        tc = TrajectoryCalculator()
+        tc.fit(objs)
+        surface = normalizer(self, tc, **normalizer_config)
         fig = plotter.make_figure([plotter.make_trace(dat) for dat in surface.values()])
         return fig

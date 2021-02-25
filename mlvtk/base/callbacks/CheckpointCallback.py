@@ -15,7 +15,7 @@ class CheckpointCallback(tf.keras.callbacks.Callback):
 
     def on_epoch_end(self, batch, logs=None):
         self.model.save_weights(
-            pathlib.Path(f"{self.path}").joinpath(f"model_{self.epoch}.h5"),
+            str(pathlib.Path(f"{self.path}").joinpath(f"model_{self.epoch}.h5")),
             overwrite=self.overwrite,
             save_format="h5",
         )
