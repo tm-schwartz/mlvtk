@@ -1,16 +1,16 @@
-import pathlib
-from typing import Generator, List, Tuple, TypeVar, Union
 import math
-from sklearn.decomposition import IncrementalPCA
+import pathlib
 import warnings
+from typing import Generator, List, Tuple, TypeVar, Union
 
-warnings.filterwarnings("ignore")
 import h5py
 import numpy as np
+from sklearn.decomposition import IncrementalPCA
 from tqdm.auto import tqdm
 
+warnings.filterwarnings("ignore")
+
 vmodel = TypeVar("vmodel")
-MB = 1000000
 
 
 class TrajectoryCalculator:
@@ -135,6 +135,11 @@ class TrajectoryCalculator:
 
     def fit(self, obj: Union[List[Union[vmodel, pathlib.Path, str]], vmodel]):
 
+        # check for `t0_h5.hdf5`
+        t0_h5 = pathlib.Path("t0_h5.hdf5")
+        if t0_h5.exists():
+            pathlib.os.remove(t0_h5)
+
         if isinstance(obj, List):
             if isinstance(obj[0], str):
                 _obj = [pathlib.Path(str(p)) for p in obj]
@@ -182,7 +187,7 @@ class TrajectoryCalculator:
                 # for epoch in range(len(T0[model])- 1):
                 for epoch in range(1, len(T0[model])):
                     #    epoch_diff = final_epoch - T0[model][epoch]
-                    epoch_diff = first_epoch - T0[model][epoch]
+                    epoch_diff = T0[model][epoch] - first_epoch
                     xdir, ydir = self.project_2d(
                         epoch_diff,
                         self._component_allocation(pca_1),

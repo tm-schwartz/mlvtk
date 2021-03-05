@@ -5,8 +5,11 @@ import typing
 from typing import Union, Optional
 
 import tensorflow as tf
+
+tf_v = tf.version.VERSION
 from tensorflow.python.keras.engine.data_adapter import train_validation_split
 from tensorflow.python.keras.engine.functional import Functional
+
 from tensorflow.keras import Sequential, Model
 
 from .callbacks.CheckpointCallback import CheckpointCallback
@@ -16,11 +19,20 @@ from .plot import plotter
 
 
 class Vmodel:
+    __slots__ = (
+        "model",
+        "opt",
+        "loss",
+        "overwrite",
+        "checkpoint_path",
+        "validation_data",
+        "validation_steps",
+    )
+
     def __init__(
         self,
         model: Optional[Union[Functional, Sequential, Model]] = None,
         checkpoint_path: Union[pathlib.Path, str] = "vwd",
-        verbose: int = 0,
         inputs=None,
         outputs=None,
     ):
@@ -229,7 +241,7 @@ class Vmodel:
 
         config = self.__getattr__("get_config")()
         if (
-            type(self.model) == tf.python.keras.engine.functional.Functional
+            type(self.model) == Functional
         ):  # need to test type instead of isinstance bc Sequential is Functional
             new_mod = tf.keras.Model.from_config(config)
         else:

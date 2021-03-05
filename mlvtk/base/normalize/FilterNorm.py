@@ -40,6 +40,10 @@ def normalizer(
     **kwargs,
 ):
 
+    # Instead of taking current weights, take starting weights
+    starting_weights_path = model._get_cpoint_path().joinpath("model_0.h5")
+    model.save_weights(model._get_cpoint_path().joinpath("curr_weights.h5"))
+    model.load_weights(starting_weights_path)
     weights: List[np.ndarray] = model.get_weights()
 
     for key in kwargs:
