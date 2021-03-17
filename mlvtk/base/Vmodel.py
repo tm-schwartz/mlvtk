@@ -2,11 +2,8 @@ import pathlib
 import shutil
 import typing
 
-from typing import Union, Optional
-
 import tensorflow as tf
 
-tf_v = tf.version.VERSION
 from tensorflow.python.keras.engine.data_adapter import train_validation_split
 from tensorflow.python.keras.engine.functional import Functional
 
@@ -31,8 +28,8 @@ class Vmodel:
 
     def __init__(
         self,
-        model: Optional[Union[Functional, Sequential, Model]] = None,
-        checkpoint_path: Union[pathlib.Path, str] = "vwd",
+        model: typing.Optional[typing.Union[Functional, Sequential, Model]] = None,
+        checkpoint_path: typing.Union[pathlib.Path, str] = "vwd",
         inputs=None,
         outputs=None,
     ):
@@ -45,7 +42,6 @@ class Vmodel:
         else:
             self.model = model
 
-        self.verbose = verbose
         self.overwrite = False
         self.checkpoint_path: typing.Union[pathlib.Path, str] = pathlib.Path(
             checkpoint_path
@@ -197,23 +193,6 @@ class Vmodel:
         else:
             callbacks = [CheckpointCallback(path=self._get_cpoint_path())]
 
-        keys = [
-            "y",
-            "epochs",
-            "verbose",
-            "callbacks",
-            "validation_split",
-            "shuffle",
-            "class_weight",
-            "sample_weight",
-            "initial_epoch",
-            "steps_per_epoch",
-            "validation_steps",
-            "validation_freq",
-            "max_queue_size",
-            "workers",
-            "use_multiprocessing",
-        ]
         return self.__getattr__("fit")(
             x=x,
             y=y,
@@ -270,6 +249,7 @@ class Vmodel:
             "extension": 1,
             "quiet": False,
         },
+        selected_model=0,
     ):
         if objs:
             objs = [self, *objs]
@@ -277,7 +257,7 @@ class Vmodel:
             objs = self
 
         tc = TrajectoryCalculator()
-        tc.fit(objs)
+        tc.fit(objs, selected_model=selected_model)
         surface = normalizer(self, tc, **normalizer_config)
         fig = plotter.make_figure([plotter.make_trace(dat) for dat in surface.values()])
         return fig

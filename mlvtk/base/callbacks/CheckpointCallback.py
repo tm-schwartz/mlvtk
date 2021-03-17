@@ -20,3 +20,10 @@ class CheckpointCallback(tf.keras.callbacks.Callback):
             save_format="h5",
         )
         self.epoch += 1
+
+    def on_train_end(self, logs=None):
+        self.model.save_weights(
+            str(pathlib.Path(f"{self.path}").joinpath(f"model_{self.epoch}.h5")),
+            overwrite=self.overwrite,
+            save_format="h5",
+        )

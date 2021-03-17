@@ -1,4 +1,3 @@
-import math
 import pathlib
 import warnings
 from typing import Generator, List, Tuple, TypeVar, Union
@@ -15,7 +14,7 @@ vmodel = TypeVar("vmodel")
 
 class TrajectoryCalculator:
 
-    __slots__ = ("kernel_dims", "files", "xdir", "ydir", "evr", "pca_dirs")
+    __slots__ = ("kernel_dims", "xdir", "ydir", "evr", "pca_dirs", "selected_model_fn")
 
     def _aggregate_files(self, folders):
         """Take folders list, gather and sort by epoch. Folders can be a list of paths for multiple models."""
@@ -67,32 +66,62 @@ class TrajectoryCalculator:
 
         return size, ext_link_file, index, sorted_model_files[-1], dataset_paths
 
-    def create_t0(self, size, ext_link_file, index, final_model_fn, dataset_paths):
-        n_epochs: int = int(final_model_fn.stem.split("_")[-1])
+    def create_t0(
+        self, size, ext_link_file, index, final_model_fn, dataset_paths, selected_model
+    ):
+        def sub(ms):
+            minuend, subtrahend = ms
+            return np.subtract(minuend[:], subtrahend[:]).flatten()
+
+        fin_model_fn_split = int(final_model_fn.stem.split("_")[-1])
+        fin_model_fn_joined_epoch = final_model_fn.parent.joinpath(
+            f"model_{selected_model}.h5"
+        )
+
+        if index == 0 and selected_model == fin_model_fn_split:
+            self.selected_model_fn = fin_model_fn_joined_epoch
+
+            selected_model_fn = final_model_fn.parent.joinpath(
+                f"model_{selected_model}.h5"
+            )
+        elif index > 0 and selected_model == fin_model_fn_split:
+            selected_model_fn = self.selected_model_fn
+        else:
+            selected_model_fn = final_model_fn.parent.joinpath(
+                f"model_{selected_model}.h5"
+            )
+
+        # n_epochs: int = fin_model_fn_split
         with h5py.File(ext_link_file, "r", libver="latest") as elf:
+            elf_keys = elf.keys()
+            n_epochs = max([int(x.split(".")[0]) for x in elf_keys])
             with h5py.File(
                 "t0_h5.hdf5", "a", libver="latest"
             ) as t0_h5:  # TODO check what happens when file already exists
-                t0_ds = t0_h5.create_dataset(
-                    f"t0_{index}",
-                    shape=(1, size),
-                    maxshape=(n_epochs + 1, size),
-                    fillvalue=0.0,
-                    dtype="float32",
-                )
-                for link in tqdm(iterable=range(n_epochs + 1), leave=False):
-                    data_list = [
-                        elf[f"{link}.{i}"][:].flatten()
-                        for i in range(len(dataset_paths))
-                    ]
-                    if link > 0:
-                        t0_ds.resize((link + 1, size))
-                    t0_ds[link, 0:size] = np.concatenate(data_list)
-                    if not t0_ds.attrs.keys() and (
-                        np.any(np.isnan(t0_ds[link][:]))
-                        or np.any(np.isnan(t0_ds[link][:]))
-                    ):
-                        t0_ds.attrs.create("isnull", 1)
+                with h5py.File(selected_model_fn, "r", libver="latest") as sel_model:
+                    t0_ds = t0_h5.create_dataset(
+                        f"t0_{index}",
+                        shape=(1, size),
+                        maxshape=(n_epochs + 1, size),
+                        fillvalue=0.0,
+                        dtype="float32",
+                    )
+                    for link in tqdm(iterable=range(n_epochs + 1), leave=False):
+                        data_list = [
+                            (
+                                elf[f"{link}.{i}"],
+                                sel_model[dsp],
+                            )
+                            for i, dsp in enumerate(dataset_paths)
+                        ]
+                        if link > 0 and link <= n_epochs:
+                            t0_ds.resize((link + 1, size))
+                        t0_ds[link, 0:size] = np.concatenate([*map(sub, data_list)])
+                        if not t0_ds.attrs.keys() and (
+                            np.any(np.isnan(t0_ds[link][:]))
+                            or np.any(np.isnan(t0_ds[link][:]))
+                        ):
+                            t0_ds.attrs.create("isnull", 1)
 
     @staticmethod
     def _slice_generator(dataset):
@@ -107,16 +136,6 @@ class TrajectoryCalculator:
     def _yield_util(fun, inpt):
         for indice, data in enumerate(inpt):
             yield fun(data, indice)
-
-    def _component_allocation(self, component: np.ndarray) -> np.ndarray:
-        l: List[np.ndarray] = []
-        idx: int = 0
-        dims = [np.prod(dim) for dim in self.kernel_dims]
-        for d in dims:
-            l.append(component[idx : idx + d].flatten())
-            idx += d
-
-        return np.concatenate(l)  # type: ignore
 
     @staticmethod
     def project_2d(
@@ -133,7 +152,11 @@ class TrajectoryCalculator:
 
         return x, y
 
-    def fit(self, obj: Union[List[Union[vmodel, pathlib.Path, str]], vmodel]):
+    def fit(
+        self,
+        obj: Union[List[Union[vmodel, pathlib.Path, str]], vmodel],
+        selected_model=0,
+    ):
 
         # check for `t0_h5.hdf5`
         t0_h5 = pathlib.Path("t0_h5.hdf5")
@@ -153,7 +176,7 @@ class TrajectoryCalculator:
             data = self._aggregate_files([obj._get_cpoint_path()])
 
         for path_data in self._yield_util(self._make_ext_link_file, data):
-            self.create_t0(*path_data)
+            self.create_t0(*path_data, selected_model=selected_model)
         self.xdir = []
         self.ydir = []
         self.evr = []
@@ -179,19 +202,16 @@ class TrajectoryCalculator:
             self.pca_dirs: List[np.ndarray] = ipca.components_
 
             for model in T0.keys():
-                model_xdir, model_ydir = [0], [
-                    0
-                ]  # NOTE: START AT (0,0), AS WE ARE CREATING LOSS LANDSCAPE FROM EPOCH 0 DATA
+                model_xdir, model_ydir = [], []
                 # final_epoch = T0[model][-1]
-                first_epoch = T0[model][0]
                 # for epoch in range(len(T0[model])- 1):
-                for epoch in range(1, len(T0[model])):
+                for epoch in T0[model]:
                     #    epoch_diff = final_epoch - T0[model][epoch]
-                    epoch_diff = T0[model][epoch] - first_epoch
+                    # manually calculate pca transform in case of data being too large for ram
                     xdir, ydir = self.project_2d(
-                        epoch_diff,
-                        self._component_allocation(pca_1),
-                        self._component_allocation(pca_2),
+                        epoch,
+                        pca_1,
+                        pca_2,
                     )
                     model_xdir.append(xdir)
                     model_ydir.append(ydir)

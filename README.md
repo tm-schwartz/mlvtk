@@ -1,4 +1,4 @@
-# MLVTK  [![PyPI - Python Version](https://img.shields.io/badge/python-3.6.1%20|%203.7%20|%203.8%20|%203.9-brightgreen)](https://badge.fury.io/py/mlvtk) ![PyPI](https://img.shields.io/pypi/v/mlvtk?color=brightgreen&label=PyPI) [![Downloads](https://static.pepy.tech/personalized-badge/mlvtk?period=total&units=international_system&left_color=grey&right_color=brightgreen&left_text=PyPI%20Downloads)](https://pepy.tech/project/mlvtk)
+# MLVTK  [![PyPI - Python Version](https://img.shields.io/badge/python-3.6.1%20|%203.7%20|%203.8%20|%203.9-brightgreen)](https://badge.fury.io/py/mlvtk) ![PyPI](https://img.shields.io/pypi/v/mlvtk?color=brightgreen&label=PyPI)
 ### A loss surface visualization tool
 
 

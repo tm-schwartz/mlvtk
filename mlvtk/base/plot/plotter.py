@@ -1,7 +1,6 @@
 import plotly.graph_objects as go
 from pandas import DataFrame
 import numpy as np
-import pprint
 
 
 def make_trace(
