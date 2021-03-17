@@ -1,4 +1,5 @@
-# MLVTK  [![PyPI - Python Version](https://img.shields.io/pypi/pyversions/mlvtk?style=plastic)](https://badge.fury.io/py/mlvtk) [![PyPI](https://img.shields.io/pypi/v/mlvtk?style=plastic)](https://badge.fury.io/py/mlvtk) [![Downloads](https://pepy.tech/badge/mlvtk)](https://pepy.tech/project/mlvtk)
+
+# MLVTK  [![PyPI - Python Version](https://img.shields.io/badge/python-3.6.1%20|%203.7%20|%203.8%20|%203.9-brightgreen)](https://badge.fury.io/py/mlvtk) ![PyPI](https://img.shields.io/pypi/v/mlvtk?color=brightgreen&label=PyPI)
 ### A loss surface visualization tool
 
 
@@ -29,9 +30,9 @@ _Simple DNN trained on MNIST, using SGD optimizer_
 
 ## Why?
 
-- :shipit: **Simple**: A single line addition is all thats needed.
+- :shipit: **Simple**: A single line addition is all that is needed.
 - :question: **Informative**: Gain insight into what your model is seeing.
-- :notebook: **Educational**: *See* how your hyperparameters and architecture impact your
+- :notebook: **Educational**: *See* how your hyper parameters and architecture impact your
   models perception.
 
 
@@ -39,9 +40,9 @@ _Simple DNN trained on MNIST, using SGD optimizer_
 
 Requires | version
 -------- | -------
-python | >= 3.6.0 
-tensorflow | 2.3.x
-plotly | 4.9.0
+python | >= 3.6.1 
+tensorflow | >= 2.3.1, <  2.4.2
+plotly | >=4.9.0
 
 Install locally (Also works in google Colab!):
 ```sh
@@ -105,11 +106,13 @@ yval = np.random.randint(9, size=(1,10,10))
 history = model.fit(x, y, validation_data=(xval, yval), epochs=10, verbose=0)
 
 # Calling model.surface_plot() returns a plotly.graph_objs.Figure
+# model.surface_plot() will attempt to display the figure inline
+
 fig = model.surface_plot()
 
-# This can be saved to an interactive html file,
+# fig can save an interactive plot to an html file,
 fig.write_html("surface_plot.html")
 
-# or viewed in jupyter notebook/lab or other compatible tool.
+# or display the plot in jupyter notebook/lab or other compatible tool.
 fig.show()
 ```

@@ -1,11 +1,33 @@
+* 1.0.3
+** [2021-03-16 Tue]
+*** Updated
+**** Removed pepy.tech badge from README. pepy.tech does not distinguish between download count with mirrors and without mirrors.
+**** Added option to select which epoch to generate plot of. Use selected_model argument added to surface_plot().
+*** Fixed
+**** (0, 0) left off path calculation.
+** [2021-03-01 Mon]
+*** Updated
+**** CallBack now uses on_epoch_begin instead of on_epoch_end. This gives access to the starting weights of model before any training.
+**** FilterNorm.normalizer now loads starting weights instead of current (final) weights. Current (final) weights are saved to model.checkpoint_path/curr_weights.h5.
+** [2021-02-25 Thu 21:52]
+*** Fixed
+**** TrajectoryCalculator now checks for existing t0_h5.hdf5 and removes it.
+**** Vmodel imports Functional from tensorflow.python instead for using tf.python. This fixes import error when using TensorFlow 2.4.
+
 * 1.0.2
-** [2021-02-09 Tue 20:38] CalcTrajectory: Added comments describing make_ext_link_file for future implementation.
+** [2021-02-24 wed 17:02]
+*** Fixed
+**** Corrected _evaluate function call in FilterNorm. Was passing 4 args, now passes 3.
+**** Fixed plotter.make_trace if-else spacing and return.
+*** Updated
+**** FilterNorm now uses starting weights to generate loss landscape. This allows paths to start at same location when using multiple models.
+**** Added new TrajectoryCalculator with improved memory usage.
+**** TrajectoryCalculator now calculates path using \theta_0 - \theta_n, to get change in weights in relation to starting point from epoch to epoch. This makes path consistent with landscape generation from starting weights, and centers starting point of model at (0, 0).
 
 
-** [2021-02-09 Tue 20:35] CalcTrajectory: Fixed Vmodel.model.opt missing for Sequential models compiled before Vmodel creation. Added try-except to test for self.opt or assign self.opt if not exist.
+** [2021-02-09 Tue 20:38]
+*** CalcTrajectory: Added comments describing make_ext_link_file for future implementation.
 
 
-** [2021-02-11 Thu 17:23] CalcTrajectory: Added __slots__
-
-
-** [2021-02-24 Wed 17:02] Added new TrajectoryCalculator with improved memory usage. Trajectory now calculated using \Theta_0 - \Theta_n, to get path in relation to starting point. Loss landscape now generated using epoch 0 data. This allows for much improved comparison of multiple model paths. Fixed some minor bugs in FilterNorm (calling _evaluate with 4 args instead of 3). Fixed minor bugs in plotter (data[0] -> data).
+** [2021-02-09 Tue 20:35]
+*** CalcTrajectory: Fixed Vmodel.model.opt missing for Sequential models compiled before Vmodel creation. Added try-except to test for self.opt or assign self.opt if not exist.

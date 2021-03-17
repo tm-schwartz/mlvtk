@@ -1,7 +1,6 @@
 import plotly.graph_objects as go
 from pandas import DataFrame
 import numpy as np
-import pprint
 
 
 def make_trace(
@@ -27,7 +26,7 @@ def make_trace(
         )
         return surface_trace
     elif isinstance(data, tuple):
-        if len(data[0]) > 1:
+        if np.ndim(data[0]) > 1:
             colors = [
                 f"rgb{(np.random.randint(256), np.random.randint(256), np.random.randint(256))}"
                 for _ in range(len(data[0]))
@@ -46,17 +45,17 @@ def make_trace(
                 for i, (x, y, z, color) in enumerate(zip(*data, colors))
             )
 
-    else:
-        scatter_trace = go.Scatter3d(
-            x=data[0],
-            y=data[1],
-            z=data[2],
-            marker=marker,
-            line=line,
-            showlegend=showlegend,
-            name=scatter_name,
-        )
-    return scatter_trace
+        else:
+            scatter_trace = go.Scatter3d(
+                x=data[0],
+                y=data[1],
+                z=data[2],
+                marker=marker,
+                line=line,
+                showlegend=showlegend,
+                name=scatter_name,
+            )
+        return scatter_trace
 
 
 def make_figure(traces):

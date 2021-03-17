@@ -3,7 +3,6 @@ from tqdm.auto import tqdm
 import numpy as np
 import pandas as pd
 from tensorflow import data as tfdata
-from tensorflow import device
 
 T = TypeVar("T")
 LLNP = Union[List[np.float32], List[List[np.float32]]]  # type: ignore
@@ -37,9 +36,13 @@ def normalizer(
     betas_size: int = 35,
     extension: T = 1,
     quiet=False,
+    selected_model=0,
     **kwargs,
 ):
 
+    # Instead of taking current weights, take starting weights
+    selected_model_fn = model._get_cpoint_path().joinpath(f"model_{selected_model}.h5")
+    model.load_weights(selected_model_fn)
     weights: List[np.ndarray] = model.get_weights()
 
     for key in kwargs:
@@ -69,11 +72,11 @@ def normalizer(
         else:
             pca_dirs = None
 
-    if np.size(xdir) == np.size(ydir) and np.size(xdir) <= 1:  # type: ignore
-        alphas = np.linspace(-5, 5, num=alphas_size, dtype=np.float32)  # type: ignore
-        betas = np.linspace(-5, 5, num=betas_size, dtype=np.float32)  # type: ignore
+    # if np.size(xdir) == np.size(ydir) and np.size(xdir) <= 1:  # type: ignore
+    #     alphas = np.linspace(-5, 5, num=alphas_size, dtype=np.float32)  # type: ignore
+    #     betas = np.linspace(-5, 5, num=betas_size, dtype=np.float32)  # type: ignore
 
-    elif extension == "std":
+    if extension == "std":
         xdiff = np.std(xdir)
         ydiff = np.std(ydir)
 
