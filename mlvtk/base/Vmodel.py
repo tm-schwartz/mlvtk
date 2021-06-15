@@ -2,6 +2,8 @@ import pathlib
 import shutil
 import typing
 
+import numpy as np
+
 import tensorflow as tf
 
 from tensorflow.python.keras.engine.data_adapter import train_validation_split
@@ -243,6 +245,8 @@ class Vmodel:
     def surface_plot(
         self,
         objs=None,
+        resolution=200,
+        scaling=lambda z: np.log(z) / np.log(1.5),
         normalizer_config={
             "alphas_size": 35,
             "betas_size": 35,
@@ -259,5 +263,10 @@ class Vmodel:
         tc = TrajectoryCalculator()
         tc.fit(objs, selected_model=selected_model)
         surface = normalizer(self, tc, **normalizer_config)
-        fig = plotter.make_figure([plotter.make_trace(dat) for dat in surface.values()])
+        fig = plotter.make_figure(
+            [
+                plotter.make_trace(dat, resolution=resolution, scaling=scaling)
+                for dat in surface.values()
+            ]
+        )
         return fig

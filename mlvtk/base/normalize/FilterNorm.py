@@ -1,8 +1,12 @@
 from typing import List, TypeVar, Union
+from re import compile
 from tqdm.auto import tqdm
 import numpy as np
 import pandas as pd
+from tensorflow.keras import mixed_precision
 from tensorflow import data as tfdata
+
+# mixed_precision.set_global_policy("mixed_float16")
 
 T = TypeVar("T")
 LLNP = Union[List[np.float32], List[List[np.float32]]]  # type: ignore
@@ -44,7 +48,7 @@ def normalizer(
     selected_model_fn = model._get_cpoint_path().joinpath(f"model_{selected_model}.h5")
     model.load_weights(selected_model_fn)
     weights: List[np.ndarray] = model.get_weights()
-
+    lengths = [len(s.get_weights()) for s in model.layers]
     for key in kwargs:
         assert key in [
             "alphas",
@@ -141,14 +145,16 @@ def normalizer(
             delta.append(_normalize_filter((pca_delta[i : i + l.size], l)))
             i += l.size
 
-    batch_norm_filter = filter(
-        lambda layer: "batch_normalization" in layer.name, model.layers
-    )
-    if batch_norm_filter:
-        for layer in batch_norm_filter:
-            i = model.layers.index(layer)
-            gamma[i] = np.zeros((gamma[i].shape))  # type: ignore
-            delta[i] = np.zeros((delta[i].shape))  # type: ignore
+    find_bn = "BatchNormalization"
+    batch_norm_filter = filter(lambda layer: find_bn in layer.__str__(), model.layers)
+    # if batch_norm_filter:
+    for layer in batch_norm_filter:
+        i = sum(
+            lengths[: model.layers.index(layer)]
+        )  # offset by one bc gamm/delta shape means  i -> prev layr bias
+        end_i = len(layer.get_weights())
+        gamma[i : i + end_i] = np.zeros((np.shape(layer.get_weights())))  # type: ignore
+        delta[i : i + end_i] = np.zeros((np.shape(layer.get_weights())))  # type: ignore
 
     w_concat = np.concatenate([w.flatten() for w in weights])
     g_concat = np.concatenate(gamma)
@@ -212,6 +218,10 @@ def normalizer(
         )
     ):
         filter_losses[i] = _evaluate(non_eager_model, filt, model.validation_data)
+
+        #val = _evaluate(non_eager_model, filt, model.validation_data)
+
+        #filter_losses[i] = val if val != np.nan else 0.0001
 
     return {
         "surface": pd.DataFrame(
