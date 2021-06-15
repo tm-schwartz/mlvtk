@@ -1,6 +1,7 @@
 import plotly.graph_objects as go
 from pandas import DataFrame
 import numpy as np
+from scipy import interpolate
 
 
 def make_trace(
@@ -10,21 +11,39 @@ def make_trace(
     lighting=dict(ambient=0.6, roughness=0.9, diffuse=0.5, fresnel=2),
     surf_name="loss surface",
     marker=dict(symbol="circle", size=3),
-    line=dict(color="darkblue", width=2),
+    line=dict(color="firebrick", width=2),
     showlegend=True,
     scatter_name="path",
+    resolution=200,
+    scaling=lambda z: np.log(z) / np.log(1.5),
 ):
     if isinstance(data, DataFrame):
-        surface_trace = go.Surface(
-            x=data.index,
-            y=data.columns,
-            z=data.values,
+        xc, yc = np.meshgrid(data.index, data.columns)
+        z_vals = data.values
+        spline = interpolate.RectBivariateSpline(xc[0, :], yc[:, 0], z_vals, s=0)
+        x_arr = xc.ravel()
+        y_arr = yc.ravel()
+        z_arr = z_vals.ravel()
+        x_linspc = np.linspace(min(x_arr), max(x_arr), resolution)
+        y_linspc = np.linspace(min(y_arr), max(y_arr), resolution)
+        z_spline = spline(x_linspc, y_linspc).ravel()
+        x_coords, y_coords = np.meshgrid(x_linspc, y_linspc)
+        final_x_coords = x_coords.ravel()
+        final_y_coords = y_coords.ravel()
+        z_spline[z_spline < 0] = 0.0  # change neg to 0. avoid runtime warn
+        z_values = [scaling(z) for z in z_spline]
+
+        mesh_trace = go.Mesh3d(
+            x=final_x_coords,
+            y=final_y_coords,
+            z=z_values,
+            intensity=z_values,
             opacity=opacity,
             coloraxis=coloraxis,
             lighting=lighting,
             name=surf_name,
         )
-        return surface_trace
+        return mesh_trace
     elif isinstance(data, tuple):
         if np.ndim(data[0]) > 1:
             colors = [
@@ -36,7 +55,7 @@ def make_trace(
                 go.Scatter3d(
                     x=x,
                     y=y,
-                    z=z,
+                    z=[scaling(z_val) for z_val in z],
                     marker=dict(**marker, color=color),
                     line=line,
                     showlegend=showlegend,
@@ -49,7 +68,7 @@ def make_trace(
             scatter_trace = go.Scatter3d(
                 x=data[0],
                 y=data[1],
-                z=data[2],
+                z=[scaling(z_val) for z_val in data[2]],
                 marker=marker,
                 line=line,
                 showlegend=showlegend,
@@ -85,17 +104,23 @@ def make_figure(traces):
             )
 
     fig = go.Figure(data=traces)
-    # TODO verify update actually updates **here**
     fig.update_layout(
         autosize=False,
         width=1200,
         height=900,
-        margin=dict(l=10),
-        bargap=0.2,
+        # margin=dict(l=10),
+        legend=dict(yanchor="top", y=0.89, xanchor="right", x=0.8),
+        # bargap=0.2,
         coloraxis=dict(
             colorscale="haline_r",
-            colorbar=dict(title="Loss Surface Value", len=0.45),
+            colorbar=dict(
+                title="Loss Surface",
+                len=0.45,
+                yanchor="top",
+                y=0.79,
+                xanchor="right",
+                x=0.805,
+            ),
         ),
-        legend={"itemsizing": "constant"},
     )
     return fig
