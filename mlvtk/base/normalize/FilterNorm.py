@@ -218,10 +218,11 @@ def normalizer(
         )
     ):
         filter_losses[i] = _evaluate(non_eager_model, filt, model.validation_data)
+        # breakpoint()
 
-        #val = _evaluate(non_eager_model, filt, model.validation_data)
+        # val = _evaluate(non_eager_model, filt, model.validation_data)
 
-        #filter_losses[i] = val if val != np.nan else 0.0001
+        # filter_losses[i] = val if val != np.nan else 0.0001
 
     return {
         "surface": pd.DataFrame(
