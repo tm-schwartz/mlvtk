@@ -3,27 +3,27 @@
 ### A loss surface visualization tool
 
 
-<img alt="Png" src="https://raw.githubusercontent.com/tm-schwartz/mlvtk/dev/visuals/adamax.png" width="80%" />
+<img alt="Png" src="https://raw.githubusercontent.com/tm-schwartz/mlvtk/dev/visuals/elu-adam-chess.png" width="80%" />
 
-_Simple DNN trained on MNIST data set, using Adamax optimizer_
-
----
-
-<img alt="Gif" src="https://raw.githubusercontent.com/tm-schwartz/mlvtk/dev/visuals/gifs/sgd3.gif" width="80%" />
-
-_Simple DNN trained on MNIST, using SGD optimizer_
+_Simple feed-forward network trained on chess data, using elu activation and Adam optimizer_
 
 ---
 
-<img alt="Gif" src="https://raw.githubusercontent.com/tm-schwartz/mlvtk/dev/visuals/gifs/adam2.gif" width="80%" />
+<img alt="Gif" src="https://raw.githubusercontent.com/tm-schwartz/mlvtk/dev/visuals/gifs/tanh-sgd-chess.gif" width="80%" />
 
-_Simple DNN trained on MNIST, using Adam optimizer_
+_Simple feed-forward network trained on chess data, using tanh activation and SGD optimizer_
 
 ---
 
-<img alt="Gif" src="https://raw.githubusercontent.com/tm-schwartz/mlvtk/dev/visuals/gifs/sgd1.gif" width="80%" />
+<img alt="Gif" src="https://raw.githubusercontent.com/tm-schwartz/mlvtk/dev/visuals/gifs/500_500_500_sgd_relu_lettrs_2lr.gif" width="80%" />
 
-_Simple DNN trained on MNIST, using SGD optimizer_
+_3 layer feed-forward network trained on hand written letters data, using relu activation, SGD optimizer and learning rate of 2.0. Example of what happens to path when learning rate is too high_
+
+---
+
+<img alt="Gif" src="https://raw.githubusercontent.com/tm-schwartz/mlvtk/dev/visuals/gifs/hard_sigmoid-rmsprop-chess.gif" width="80%" />
+
+_Simple feed-forward network trained on chess data, using hard-sigmoid activation and RMSprop optimizer_
 
 
 
@@ -41,7 +41,7 @@ _Simple DNN trained on MNIST, using SGD optimizer_
 Requires | version
 -------- | -------
 python | >= 3.6.1 
-tensorflow | >= 2.3.1, <  2.4.2
+tensorflow | >= 2.3.1
 plotly | >=4.9.0
 
 Install locally (Also works in google Colab!):
