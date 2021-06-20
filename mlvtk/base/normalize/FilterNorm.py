@@ -219,10 +219,10 @@ def normalizer(
     ):
         filter_losses[i] = _evaluate(non_eager_model, filt, model.validation_data)
 
-        #val = _evaluate(non_eager_model, filt, model.validation_data)
+    filter_losses = np.nan_to_num(filter_losses, nan=0.0001, neginf=0.0001)
+    optimizer_losses = np.nan_to_num(optimizer_losses, nan=0.0001, neginf=0.0001)
 
-        #filter_losses[i] = val if val != np.nan else 0.0001
-
+    
     return {
         "surface": pd.DataFrame(
             data=np.reshape(filter_losses, (np.size(alphas), np.size(betas))),
